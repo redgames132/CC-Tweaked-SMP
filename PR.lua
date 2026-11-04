@@ -6,15 +6,15 @@
 -- 1. TEAM ROSTER
 -- Add your teammates here (case-sensitive)
 local team = {
-    ["YourUsername"] = true,
-    ["Teammate1"]    = true,
-    ["Teammate2"]    = true,
+    ["redgames132"] = true,
+    ["cadipadi"]    = true,
+    ["fortuneluky67"]    = true,
 }
 
 local REFRESH_RATE = 1.0 -- Update interval in seconds
 
 -- Find the Player Detector peripheral
-local detector = peripheral.find("playerDetector")
+local detector = peripheral.wrap("top") or peripheral.find("playerDetector")
 if not detector then
     error("No Player Detector found! Place one adjacent to the computer or connect via wired modem.", 0)
 end
