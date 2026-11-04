@@ -1,5 +1,5 @@
 -- ==========================================================
--- Ore Radar Pro - Pocket Computer (Create, Mekanism & Vanilla)
+-- Ore Radar Pro (Auto-Refresh) - Pocket Computer
 -- ==========================================================
 
 local scanner = peripheral.find("geo_scanner") or peripheral.find("geoScanner")
@@ -12,7 +12,6 @@ if not scanner then
 end
 if not scanner then error("Geo Scanner nao encontrado!", 0) end
 
--- Base de dados de minérios (Prioridade mais alta fica visível em cima)
 local ORES = {
     { m = "ancient_debris", c = colors.brown,     l = "Debris",   p = 12, cat = "rare" },
     { m = "uranium",        c = colors.lime,      l = "Uranium",  p = 11, cat = "mod" },
@@ -38,7 +37,7 @@ local radius = 8
 
 local w, h = term.getSize()
 local cx, cy = math.floor(w / 2), math.floor((h - 3) / 2) + 1
-local grid, statusMsg = {}, "Clica num ponto do radar"
+local grid, statusMsg = {}, "Radar ativo (Auto-Refresh)"
 
 local function getOreStyle(name)
     local n = (name or ""):lower()
@@ -61,7 +60,6 @@ local function scanOres()
     for _, b in ipairs(list) do
         local st = getOreStyle(b.name)
         if st then
-            -- Aplicar Filtro
             local pass = true
             if mode == "RAROS/MODS" and st.cat == "com" then pass = false end
             if mode == "COMUNS" and st.cat == "rare" then pass = false end
@@ -88,7 +86,7 @@ local function drawUI()
     term.setBackgroundColor(colors.black)
     term.clear()
 
-    -- Barra Superior (Nome + Filtro Ativo)
+    -- Barra Superior
     term.setCursorPos(1, 1)
     if term.isColor() then term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) end
     term.clearLine()
@@ -112,7 +110,7 @@ local function drawUI()
         end
     end
 
-    -- Desenhar Minérios Detetados
+    -- Minérios
     for _, n in pairs(grid) do
         term.setCursorPos(n.sx, n.sy)
         if term.isColor() then term.setBackgroundColor(n.st.c) term.setTextColor(colors.black) end
@@ -122,35 +120,32 @@ local function drawUI()
         term.write(sym)
     end
 
-    -- Jogador no Centro
+    -- Jogador
     term.setCursorPos(cx, cy)
     if term.isColor() then term.setBackgroundColor(colors.black) term.setTextColor(colors.white) end
     term.write("@")
 
-    -- Linha Divisória Inferior
+    -- Rodapé
     term.setCursorPos(1, h - 3)
     if term.isColor() then term.setTextColor(colors.gray) end
     term.write(string.rep("-", w))
 
-    -- Informação do Minério Selecionado
     term.setCursorPos(1, h - 2)
     if term.isColor() then term.setTextColor(colors.yellow) end
     term.write(statusMsg:sub(1, w))
 
-    -- Legenda Rápida em Rodapé
     term.setCursorPos(1, h - 1)
     if term.isColor() then term.setTextColor(colors.cyan) end
     term.write("Osm Ura Znc Dia Debris")
     
     term.setCursorPos(1, h)
     if term.isColor() then term.setTextColor(colors.lightGray) end
-    term.write("^Acima vAbaixo =Nivel (Clica p/ mudar filtro)")
+    term.write("^Acima vAbaixo =Nivel (Clica topo p/ filtro)")
 end
 
--- Ciclo Principal
-scanOres()
-drawUI()
-local tid = os.startTimer(2.1)
+-- Ciclo Principal com Atualização Automática (1.0 segundo)
+local REFRESH_TIME = 1.0
+local tid = os.startTimer(REFRESH_TIME)
 
 while true do
     local ev, p1, p2, p3 = os.pullEvent()
@@ -158,16 +153,16 @@ while true do
     if ev == "timer" and p1 == tid then
         scanOres()
         drawUI()
-        tid = os.startTimer(2.1)
+        tid = os.startTimer(REFRESH_TIME)
 
     elseif ev == "mouse_click" then
-        -- Se clicar na barra superior, muda o filtro
         if p3 == 1 then
+            -- Clicar no topo muda o filtro
             fIdx = (fIdx % #FILTERS) + 1
             scanOres()
             drawUI()
         else
-            -- Se clicar num ponto do mapa, mostra os dados exatos
+            -- Clicar num minério mostra os dados
             local n = grid[p2 .. "," .. p3]
             if n then
                 local ud = n.ry > 0 and (n.ry .. " Acima") or (n.ry < 0 and (math.abs(n.ry) .. " Abaixo") or "No Nivel")
