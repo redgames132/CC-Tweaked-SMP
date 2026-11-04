@@ -1,5 +1,5 @@
 -- ==========================================================
--- Ore Radar Pro (Auto-Refresh) - Pocket Computer
+-- Ore Radar - Modo de Diagnóstico (Raio 12 + Forçar Tudo)
 -- ==========================================================
 
 local scanner = peripheral.find("geo_scanner") or peripheral.find("geoScanner")
@@ -12,74 +12,39 @@ if not scanner then
 end
 if not scanner then error("Geo Scanner nao encontrado!", 0) end
 
-local ORES = {
-    { m = "ancient_debris", c = colors.brown,     l = "Debris",   p = 12, cat = "rare" },
-    { m = "uranium",        c = colors.lime,      l = "Uranium",  p = 11, cat = "mod" },
-    { m = "diamond",        c = colors.blue,      l = "Diamond",  p = 11, cat = "rare" },
-    { m = "emerald",        c = colors.green,     l = "Emerald",  p = 10, cat = "rare" },
-    { m = "osmium",         c = colors.cyan,      l = "Osmium",   p = 10, cat = "mod" },
-    { m = "zinc",           c = colors.lightBlue, l = "Zinc",     p = 9,  cat = "mod" },
-    { m = "fluorite",       c = colors.pink,      l = "Fluorite", p = 8,  cat = "mod" },
-    { m = "lead_ore",       c = colors.purple,    l = "Lead",     p = 7,  cat = "mod" },
-    { m = "deepslate_lead", c = colors.purple,    l = "Lead",     p = 7,  cat = "mod" },
-    { m = "gold",           c = colors.yellow,    l = "Gold",     p = 7,  cat = "rare" },
-    { m = "tin_ore",        c = colors.lightGray, l = "Tin",      p = 6,  cat = "mod" },
-    { m = "deepslate_tin",  c = colors.lightGray, l = "Tin",      p = 6,  cat = "mod" },
-    { m = "redstone",       c = colors.red,       l = "Redstone", p = 4,  cat = "com" },
-    { m = "iron",           c = colors.orange,    l = "Iron",     p = 3,  cat = "com" },
-    { m = "copper",         c = colors.orange,    l = "Copper",   p = 2,  cat = "com" },
-    { m = "coal",           c = colors.gray,      l = "Coal",     p = 1,  cat = "com" },
-}
-
-local FILTERS = {"TUDO", "RAROS/MODS", "COMUNS"}
-local fIdx = 1
-local radius = 8
-
+local radius = 12 -- Aumentado para 12 blocos para testar
 local w, h = term.getSize()
 local cx, cy = math.floor(w / 2), math.floor((h - 3) / 2) + 1
-local grid, statusMsg = {}, "Radar ativo (Auto-Refresh)"
-
-local function getOreStyle(name)
-    local n = (name or ""):lower()
-    for _, o in ipairs(ORES) do
-        if n:find(o.m) then return o end
-    end
-    if n:find("ore") or n:find("debris") then
-        return { c = colors.magenta, l = n:match(":(.+)") or n, p = 5, cat = "mod" }
-    end
-    return nil
-end
+local grid, statusMsg = {}, "A varrer minérios..."
 
 local function scanOres()
     local ok, list = pcall(function() return scanner.scan(radius) end)
-    if not ok or type(list) ~= "table" then return end
+    if not ok or type(list) ~= "table" then
+        statusMsg = "Erro no scan ou sem energia!"
+        return
+    end
     
     grid = {}
-    local mode = FILTERS[fIdx]
+    local totalFound = 0
 
     for _, b in ipairs(list) do
-        local st = getOreStyle(b.name)
-        if st then
-            local pass = true
-            if mode == "RAROS/MODS" and st.cat == "com" then pass = false end
-            if mode == "COMUNS" and st.cat == "rare" then pass = false end
+        local name = (b.name or ""):lower()
+        -- DETETAR QUALQUER BLOCO QUE CONTENHA "ORE" OU "DEBRIS" OU "STONE" (para teste)
+        if name:find("ore") or name:find("debris") or name:find("stone") then
+            totalFound = totalFound + 1
+            local rx = math.floor(b.x or 0)
+            local ry = math.floor(b.y or 0)
+            local rz = math.floor(b.z or 0)
+            local sx, sy = cx + rx, cy + rz
 
-            if pass then
-                local rx = math.floor(b.x or 0)
-                local ry = math.floor(b.y or 0)
-                local rz = math.floor(b.z or 0)
-                local sx, sy = cx + rx, cy + rz
-
-                if sx >= 2 and sx <= w - 1 and sy >= 2 and sy <= h - 3 then
-                    local k = sx .. "," .. sy
-                    local cur = grid[k]
-                    if not cur or st.p > cur.st.p or (st.p == cur.st.p and math.abs(ry) < math.abs(cur.ry)) then
-                        grid[k] = { sx = sx, sy = sy, rx = rx, ry = ry, rz = rz, st = st }
-                    end
-                end
+            if sx >= 2 and sx <= w - 1 and sy >= 2 and sy <= h - 3 then
+                local k = sx .. "," .. sy
+                -- Cor padrão magenta para qualquer minério detetado
+                grid[k] = { sx = sx, sy = sy, rx = rx, ry = ry, rz = rz, name = name }
             end
         end
     end
+    statusMsg = "Total blocos detetados: " .. totalFound
 end
 
 local function drawUI()
@@ -90,9 +55,7 @@ local function drawUI()
     term.setCursorPos(1, 1)
     if term.isColor() then term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) end
     term.clearLine()
-    term.write(" RADAR")
-    term.setCursorPos(w - string.len(FILTERS[fIdx]) - 2, 1)
-    term.write("[" .. FILTERS[fIdx] .. "]")
+    term.write(" RADAR (DIAGNOSTICO)")
     
     term.setCursorPos(cx, 1)
     if term.isColor() then term.setTextColor(colors.yellow) end
@@ -102,7 +65,7 @@ local function drawUI()
     if term.isColor() then term.setBackgroundColor(colors.black) end
     for y = 2, h - 4 do
         for x = 2, w - 1 do
-            if math.abs(x - cx) <= 8 and math.abs(y - cy) <= 7 then
+            if math.abs(x - cx) <= 12 and math.abs(y - cy) <= 7 then
                 term.setCursorPos(x, y)
                 if term.isColor() then term.setTextColor(colors.gray) end
                 term.write(".")
@@ -113,11 +76,8 @@ local function drawUI()
     -- Minérios
     for _, n in pairs(grid) do
         term.setCursorPos(n.sx, n.sy)
-        if term.isColor() then term.setBackgroundColor(n.st.c) term.setTextColor(colors.black) end
-        local sym = "="
-        if n.ry > 1 then sym = "^"
-        elseif n.ry < -1 then sym = "v" end
-        term.write(sym)
+        if term.isColor() then term.setBackgroundColor(colors.magenta) term.setTextColor(colors.black) end
+        term.write("o")
     end
 
     -- Jogador
@@ -134,41 +94,20 @@ local function drawUI()
     if term.isColor() then term.setTextColor(colors.yellow) end
     term.write(statusMsg:sub(1, w))
 
-    term.setCursorPos(1, h - 1)
-    if term.isColor() then term.setTextColor(colors.cyan) end
-    term.write("Osm Ura Znc Dia Debris")
-    
     term.setCursorPos(1, h)
     if term.isColor() then term.setTextColor(colors.lightGray) end
-    term.write("^Acima vAbaixo =Nivel (Clica topo p/ filtro)")
+    term.write("Modo de Teste (Mostra tudo com 'ore')")
 end
 
--- Ciclo Principal com Atualização Automática (1.0 segundo)
-local REFRESH_TIME = 1.0
-local tid = os.startTimer(REFRESH_TIME)
+local tid = os.startTimer(1.0)
+scanOres()
+drawUI()
 
 while true do
-    local ev, p1, p2, p3 = os.pullEvent()
-
+    local ev, p1 = os.pullEvent()
     if ev == "timer" and p1 == tid then
         scanOres()
         drawUI()
-        tid = os.startTimer(REFRESH_TIME)
-
-    elseif ev == "mouse_click" then
-        if p3 == 1 then
-            -- Clicar no topo muda o filtro
-            fIdx = (fIdx % #FILTERS) + 1
-            scanOres()
-            drawUI()
-        else
-            -- Clicar num minério mostra os dados
-            local n = grid[p2 .. "," .. p3]
-            if n then
-                local ud = n.ry > 0 and (n.ry .. " Acima") or (n.ry < 0 and (math.abs(n.ry) .. " Abaixo") or "No Nivel")
-                statusMsg = string.format("%s | X:%d Z:%d (%s)", n.st.l, n.rx, n.rz, ud)
-                drawUI()
-            end
-        end
+        tid = os.startTimer(1.0)
     end
 end
