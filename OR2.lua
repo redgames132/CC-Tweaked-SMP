@@ -79,4 +79,35 @@ local function draw()
     term.write("N")
 
     for _, n in pairs(grid) do
-        term.setCursorPos(n.sx, n.
+        term.setCursorPos(n.sx, n.sy)
+        setCol(colors.black, n.st.c)
+        term.write(n.ry > 1 and "^" or (n.ry < -1 and "v" or "="))
+    end
+
+    term.setCursorPos(cx, cy)
+    setCol(colors.white, colors.black)
+    term.write("@")
+
+    term.setCursorPos(1, h - 1)
+    setCol(colors.yellow, colors.black)
+    term.write(info:sub(1, w))
+    term.setCursorPos(1, h)
+    setCol(colors.lightGray, colors.black)
+    term.write("^Up vDown =Lvl | Tap dot")
+end
+
+local tid = os.startTimer(0.1)
+while true do
+    local ev, p1, p2, p3 = os.pullEvent()
+    if ev == "timer" and p1 == tid then
+        scan()
+        draw()
+        tid = os.startTimer(2.2)
+    elseif ev == "mouse_click" then
+        local n = grid[p2 .. "," .. p3]
+        if n then
+            info = string.format("%s X:%d Y:%d Z:%d", n.st.l, n.rx, n.ry, n.rz)
+            draw()
+        end
+    end
+end
