@@ -172,7 +172,7 @@ local function promptPassword(playerName)
 
     disp.setCursorPos(2, 4)
     if disp.isColor() then disp.setTextColor(colors.white) end
-    disp.write("Type password in Computer terminal (9441)...")
+    disp.write("Type password in Computer terminal...")
 
     -- Prompt inside the computer terminal
     term.clear()
