@@ -8,7 +8,7 @@
 local team = {
     ["redgames132"] = true,
     ["cadipadi"]    = true,
-    ["fortuneluky67"]    = true,
+    ["fortunelucky67"]    = true,
 }
 
 local REFRESH_RATE = 1.0 -- Update interval in seconds
