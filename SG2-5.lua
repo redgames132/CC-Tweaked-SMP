@@ -1,42 +1,35 @@
 -- ==========================================================
--- J.A.R.V.I.S. - Smart Glasses Overlay HUD & AI Assistant
--- Advanced Peripherals (Minecraft 1.21.1 NeoForge)
+-- J.A.R.V.I.S. - Smart Glasses HUD & Assistente de IA
+-- Corrigido para Advanced Peripherals 0.8+ (MC 1.21.1)
+-- Layout adaptado para não sobrepor Minimapa nem Jetpack
 -- ==========================================================
 
 local AI_NAME = "J.A.R.V.I.S."
 local HOME_FILE = "ai_home.txt"
 local hudVisible = true
-local hudX, hudY = 8, 8
 
--- 1. Universal Module & Peripheral Finder
-local function findDevice(keyword)
-    local keyLow = keyword:lower()
-    if smartglasses and type(smartglasses.modules) == "table" then
-        for k, v in pairs(smartglasses.modules) do
-            if tostring(k):lower():find(keyLow) then
-                return v
-            end
-        end
-    end
-    for _, name in ipairs(peripheral.getNames()) do
-        if name:lower():find(keyLow) then
-            return peripheral.wrap(name)
-        end
-        local pType = peripheral.getType(name)
-        if pType and tostring(pType):lower():find(keyLow) then
-            return peripheral.wrap(name)
-        end
-    end
-    return nil
+-- Posição padrão: Debaixo do minimapa à esquerda (X=6, Y=148)
+local hudX, hudY = 6, 148
+
+-- 1. Detetar Módulos dos Smart Glasses (Acesso Direto AP 0.8)
+local overlay = nil
+local nvModule = nil
+
+if smartglasses and smartglasses.modules then
+    overlay  = smartglasses.modules["advancedperipherals:overlay"] or smartglasses.modules.overlay
+    nvModule = smartglasses.modules["advancedperipherals:night_vision"] or smartglasses.modules.night_vision
 end
 
-local overlay  = findDevice("overlay")
-local nvModule = findDevice("night_vision")
-local scanner  = findDevice("geo_scanner") or findDevice("geoscanner")
-local chatBox  = findDevice("chat_box") or findDevice("chatbox")
-local detector = findDevice("player_detector") or findDevice("playerdetector")
+-- Fallback caso esteja ligado como periférico
+if not overlay then
+    overlay = peripheral.find("overlay") or peripheral.find("advancedperipherals:overlay")
+end
 
--- 2. Load / Save Home Waypoint
+local scanner  = peripheral.find("geo_scanner") or peripheral.find("geoScanner")
+local chatBox  = peripheral.find("chat_box") or peripheral.find("chatBox")
+local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
+
+-- 2. Carregar / Guardar Coordenadas de Casa (Home)
 local homePos = nil
 if fs.exists(HOME_FILE) then
     local f = fs.open(HOME_FILE, "r")
@@ -52,67 +45,77 @@ local function saveHome(x, y, z)
     f.close()
 end
 
--- 3. Overlay HUD Manager
-local hudLines = {}
+-- 3. Gestor de Objetos do Overlay Module (Com gui = true)
+local hudObjects = {}
 
-local function clearOverlay()
+local function clearHud()
     if overlay and overlay.clear then
         pcall(overlay.clear)
     end
-    hudLines = {}
+    for _, obj in pairs(hudObjects) do
+        if obj and obj.remove then pcall(obj.remove) end
+    end
+    hudObjects = {}
 end
 
-local function createTextObject(x, y, text, color)
+local function makeGuiText(x, y, str, hexColor)
     if not overlay or not overlay.createObject then return nil end
 
-    -- Try full namespace ID first, then short ID (no gui=true so it renders on main HUD)
-    local ok, obj = pcall(function()
-        return overlay.createObject("advancedperipherals:text", {
-            x = x, y = y, text = text, color = color
-        })
-    end)
-    if ok and obj then return obj end
+    local props = {
+        text = str,
+        x = x,
+        y = y,
+        color = hexColor or 0xFFFFFF,
+        gui = true,
+        enabled = true
+    }
 
-    local ok2, obj2 = pcall(function()
-        return overlay.createObject("text", {
-            x = x, y = y, text = text, color = color
-        })
+    local ok, obj = pcall(function()
+        return overlay.createObject("advancedperipherals:text", props)
     end)
-    if ok2 and obj2 then return obj2 end
+
+    if ok and obj then
+        if obj.setGui then pcall(function() obj.setGui(true) end) end
+        if obj.setEnabled then pcall(function() obj.setEnabled(true) end) end
+        return obj
+    end
 
     return nil
 end
 
 local function initHud()
-    clearOverlay()
+    clearHud()
     if not overlay then return false end
 
-    hudLines.header  = createTextObject(hudX, hudY,      "[" .. AI_NAME .. "] Booting...", 0x00FFFF)
-    hudLines.stats   = createTextObject(hudX, hudY + 11, "POS: -- | HP: --",               0x55FF55)
-    hudLines.scanner = createTextObject(hudX, hudY + 22, "SCAN: Ready",                    0xFFFF55)
-    hudLines.speech  = createTextObject(hudX, hudY + 33, "> Online! Type 'help' or '$help'", 0xFFFFFF)
+    -- Painel Tático (Debaixo do Minimapa à esquerda)
+    hudObjects.header  = makeGuiText(hudX, hudY,      "[" .. AI_NAME .. "] Online",   0x00FFFF)
+    hudObjects.stats   = makeGuiText(hudX, hudY + 11, "XYZ: -- | HP: --",             0x55FF55)
+    hudObjects.scanner = makeGuiText(hudX, hudY + 22, "SCAN: A aguardar...",          0xFFFF55)
+    hudObjects.speech  = makeGuiText(hudX, hudY + 33, "> Escreve 'help' ou '$help'",  0xFFFFFF)
 
-    return hudLines.header ~= nil
+    return hudObjects.header ~= nil
 end
 
-local function updateLine(key, yOffset, newText, color)
+local function setLine(key, offsetY, textStr, hexColor)
     if not overlay or not hudVisible then return end
-    local obj = hudLines[key]
+    local obj = hudObjects[key]
 
     if obj and obj.setText then
         local ok = pcall(function()
-            obj.setText(newText)
-            if color and obj.setColor then obj.setColor(color) end
+            obj.setText(textStr)
+            if hexColor and obj.setColor then obj.setColor(hexColor) end
+            if obj.setX then obj.setX(hudX) end
+            if obj.setY then obj.setY(hudY + offsetY) end
+            if obj.setGui then obj.setGui(true) end
         end)
         if ok then return end
     end
 
-    -- Fallback: recreate if object reference was lost
-    if obj and obj.remove then pcall(obj.remove) end
-    hudLines[key] = createTextObject(hudX, hudY + yOffset, newText, color or 0xFFFFFF)
+    -- Recria o elemento caso tenha perdido a referência
+    hudObjects[key] = makeGuiText(hudX, hudY + offsetY, textStr, hexColor)
 end
 
--- 4. Owner Position & Status Reader
+-- 4. Obter Dados do Utilizador dos Óculos
 local ownerName = nil
 
 local function getOwnerData()
@@ -120,11 +123,14 @@ local function getOwnerData()
         local ok, data = pcall(smartglasses.getOwner)
         if ok and type(data) == "table" then
             if data.name then ownerName = data.name end
+            local px = data.x or (data.pos and data.pos.x) or (data.position and data.position.x) or 0
+            local py = data.y or (data.pos and data.pos.y) or (data.position and data.position.y) or 0
+            local pz = data.z or (data.pos and data.pos.z) or (data.position and data.position.z) or 0
             return {
                 name = data.name or ownerName or "Boss",
-                x = math.floor(data.x or (data.pos and data.pos.x) or 0),
-                y = math.floor(data.y or (data.pos and data.pos.y) or 0),
-                z = math.floor(data.z or (data.pos and data.pos.z) or 0),
+                x = math.floor(px),
+                y = math.floor(py),
+                z = math.floor(pz),
                 health = data.health,
                 maxHealth = data.maxHealth or 20
             }
@@ -154,10 +160,10 @@ local function getOwnerData()
     return { name = ownerName or "Boss", x = 0, y = 0, z = 0 }
 end
 
--- 5. AI Speech Output (Overlay HUD + Terminal + Optional Chat)
+-- 5. Fala da IA (HUD + Terminal + Chat)
 local function aiSay(msg, isAlert)
-    local colorHex = isAlert and 0xFF5555 or 0xFFFFFF
-    updateLine("speech", 33, "> " .. msg, colorHex)
+    local col = isAlert and 0xFF5555 or 0xFFFFFF
+    setLine("speech", 33, "> " .. msg, col)
 
     if term.isColor() then
         term.setTextColor(isAlert and colors.red or colors.cyan)
@@ -176,19 +182,19 @@ local function aiSay(msg, isAlert)
     end
 end
 
--- 6. Ore Scanner (Mekanism, Create, and Rare Vanilla)
+-- 6. Scanner de Minérios (Mekanism, Create e Vanilla Raros)
 local RARE_ORES = {
     "ancient_debris", "uranium", "osmium", "diamond",
     "emerald", "fluorite", "zinc", "gold", "lead_ore", "tin_ore"
 }
 
 local function scanNearbyOres()
-    if not scanner then return "No Geo Scanner module installed" end
+    if not scanner then return "SCAN: Sem Geo Scanner nos oculos" end
     local scanFn = scanner.scanBlocks or scanner.scan
-    if not scanFn then return "Scanner unavailable" end
+    if not scanFn then return "SCAN: Indisponivel" end
 
     local ok, blocks = pcall(function() return scanFn(8) end)
-    if not ok or type(blocks) ~= "table" then return nil end -- Cooldown active
+    if not ok or type(blocks) ~= "table" then return nil end
 
     local best = nil
     local bestDist = 999
@@ -203,125 +209,126 @@ local function scanNearbyOres()
                 local dist = math.abs(b.x or 0) + math.abs(b.y or 0) + math.abs(b.z or 0)
                 if dist < bestDist then
                     bestDist = dist
-                    best = { name = clean, x = math.floor(b.x or 0), y = math.floor(b.y or 0), z = math.floor(b.z or 0) }
+                    best = {
+                        name = clean,
+                        x = math.floor(b.x or 0),
+                        y = math.floor(b.y or 0),
+                        z = math.floor(b.z or 0)
+                    }
                 end
                 break
             end
         end
     end
 
-    if not best then return "SCAN: No rare/mod ores within 8m" end
+    if not best then return "SCAN: Nenhum minerio raro (8m)" end
 
     local ew = best.x > 0 and (best.x .. "E") or (best.x < 0 and (math.abs(best.x) .. "W") or "0E")
     local ns = best.z > 0 and (best.z .. "S") or (best.z < 0 and (math.abs(best.z) .. "N") or "0N")
-    local ud = best.y > 0 and (best.y .. "Up") or (best.y < 0 and (math.abs(best.y) .. "Dn") or "Lvl")
+    local ud = best.y > 0 and (best.y .. "Cima") or (best.y < 0 and (math.abs(best.y) .. "Baixo") or "Nivel")
 
-    return string.format("SCAN: %s (%s, %s, %s) [+%d]", best.name, ew, ns, ud, total)
+    return string.format("MINERIO: %s (%s, %s, %s) [+%d]", best.name, ew, ns, ud, total)
 end
 
--- 7. Refresh Live HUD Data
+-- 7. Atualização Automática do HUD
 local function refreshHud()
     if not overlay or not hudVisible then return end
 
     local t = os.time()
     local timeStr = textutils.formatTime(t, false)
-    local phase = (t >= 6 and t < 18.5) and "Day" or "Night"
-    updateLine("header", 0, string.format("[%s] %s (%s)", AI_NAME, timeStr, phase), 0x00FFFF)
+    local phase = (t >= 6 and t < 18.5) and "Dia" or "Noite"
+    setLine("header", 0, string.format("[%s] %s (%s)", AI_NAME, timeStr, phase), 0x00FFFF)
 
     local info = getOwnerData()
-    local hpStr = info.health and string.format("HP:%d/%d", math.floor(info.health), info.maxHealth) or ""
+    local hpStr = info.health and string.format(" | HP:%d/%d", math.floor(info.health), info.maxHealth) or ""
     local homeStr = ""
     if homePos then
         local dx, dz = homePos.x - info.x, homePos.z - info.z
         local dist = math.floor(math.sqrt(dx * dx + dz * dz))
-        homeStr = string.format(" | Home:%dm", dist)
+        homeStr = string.format(" | Casa:%dm", dist)
     end
-    updateLine("stats", 11, string.format("XYZ: %d, %d, %d %s%s", info.x, info.y, info.z, hpStr, homeStr), 0x55FF55)
+    setLine("stats", 11, string.format("XYZ: %d, %d, %d%s%s", info.x, info.y, info.z, hpStr, homeStr), 0x55FF55)
 
-    local scanResult = scanNearbyOres()
-    if scanResult then
-        local col = scanResult:find("No rare") and 0xAAAAAA or 0xFFFF55
-        updateLine("scanner", 22, scanResult, col)
+    local scanRes = scanNearbyOres()
+    if scanRes then
+        local col = scanRes:find("Nenhum") and 0xAAAAAA or 0xFFFF55
+        setLine("scanner", 22, scanRes, col)
     end
 end
 
--- 8. Command Processor
+-- 8. Processador de Comandos da IA
 local function processCommand(rawText, sender)
     if sender and sender ~= "" and sender ~= "[say]" then ownerName = sender end
     local cmd = rawText:lower():gsub("^%$", ""):gsub("^ai%s+", ""):gsub("^%s+", ""):gsub("%s+$", "")
     local info = getOwnerData()
 
     if cmd == "help" or cmd == "?" then
-        aiSay("Cmds: status, ores, nv, set home, home, hud, move <x> <y>, joke")
+        aiSay("Cmds: status, ores, nv, set home, home, pos topo, pos mapa, move <x> <y>, hud")
 
-    elseif cmd == "status" or cmd:find("hi") == 1 or cmd:find("hello") == 1 then
-        aiSay(string.format("All systems nominal, %s! Pos: %d, %d, %d", info.name, info.x, info.y, info.z))
+    elseif cmd == "status" or cmd:find("oi") == 1 or cmd:find("hi") == 1 then
+        aiSay(string.format("Sistemas a 100%%, %s! Pos: %d, %d, %d", info.name, info.x, info.y, info.z))
 
-    elseif cmd:find("ore") or cmd:find("scan") then
-        local res = scanNearbyOres() or "Scanner cooling down (wait 2s)."
-        updateLine("scanner", 22, res, 0xFFFF55)
+    elseif cmd:find("ore") or cmd:find("scan") or cmd:find("minerio") then
+        local res = scanNearbyOres() or "Scanner em arrefecimento (aguarda 2s)."
+        setLine("scanner", 22, res, 0xFFFF55)
         aiSay(res)
 
-    elseif cmd == "nv" or cmd:find("night") then
+    elseif cmd == "nv" or cmd:find("night") or cmd:find("luz") then
         if not nvModule then
-            aiSay("Night Vision Module not installed in glasses!", true)
+            aiSay("Modulo de Visao Noturna nao detetado nos oculos!", true)
         else
             local ok, cur = pcall(nvModule.isNightVisionEnabled)
             local nextState = not (ok and cur)
             pcall(function() nvModule.enableNightVision(nextState) end)
-            aiSay("Night Vision: " .. (nextState and "ENABLED" or "DISABLED"))
+            aiSay("Visao Noturna: " .. (nextState and "ATIVADA" or "DESATIVADA"))
         end
 
     elseif cmd == "set home" or cmd == "sethome" then
         saveHome(info.x, info.y, info.z)
-        aiSay(string.format("Home saved at %d, %d, %d!", info.x, info.y, info.z))
+        aiSay(string.format("Casa guardada em %d, %d, %d!", info.x, info.y, info.z))
 
-    elseif cmd == "home" or cmd == "base" then
+    elseif cmd == "home" or cmd == "casa" then
         if not homePos then
-            aiSay("No home saved! Use 'set home' first.", true)
+            aiSay("Usa 'set home' primeiro para guardar a base!", true)
         else
             local dx, dz = homePos.x - info.x, homePos.z - info.z
             local dist = math.floor(math.sqrt(dx * dx + dz * dz))
             local ew = dx > 0 and (dx .. "E") or (math.abs(dx) .. "W")
             local ns = dz > 0 and (dz .. "S") or (math.abs(dz) .. "N")
-            aiSay(string.format("Base is %dm away (%s, %s, Y:%d)", dist, ew, ns, homePos.y))
+            aiSay(string.format("Casa a %dm (%s, %s | Y:%d)", dist, ew, ns, homePos.y))
         end
 
-    elseif cmd == "hud" then
-        hudVisible = not hudVisible
-        if not hudVisible then
-            clearOverlay()
-        else
-            initHud()
-            refreshHud()
-        end
-        print("HUD visibility: " .. tostring(hudVisible))
+    elseif cmd == "pos mapa" then
+        hudX, hudY = 6, 148
+        refreshHud()
+        aiSay("HUD posicionado debaixo do Minimapa (6, 148).")
+
+    elseif cmd == "pos topo" then
+        hudX, hudY = 300, 8
+        refreshHud()
+        aiSay("HUD posicionado no Canto Superior Direito (300, 8).")
 
     elseif cmd:find("^move ") then
         local nx, ny = cmd:match("^move%s+(%d+)%s+(%d+)")
         if nx and ny then
             hudX, hudY = tonumber(nx), tonumber(ny)
-            initHud()
             refreshHud()
-            aiSay("HUD moved to X:" .. hudX .. " Y:" .. hudY)
+            aiSay("HUD movido para X:" .. hudX .. " Y:" .. hudY)
         end
 
-    elseif cmd:find("joke") then
-        local jokes = {
-            "Why did the Creeper cross the road? To get to the other SSSSS-side!",
-            "I scanned for intelligent life... only found Nitwit Villagers.",
-            "Powered by Mekanism Osmium and Create rotational force!"
-        }
-        aiSay(jokes[math.random(#jokes)])
+    elseif cmd == "hud" then
+        hudVisible = not hudVisible
+        if not hudVisible then clearHud() else initHud() refreshHud() end
+        print("Visibilidade do HUD: " .. tostring(hudVisible))
 
     else
-        aiSay("Unknown command '" .. cmd .. "'. Type 'help' for options.")
+        aiSay("Comando desconhecido. Escreve 'help' para ver a lista.")
     end
 end
 
--- 9. Main Loops
+-- 9. Loops Principais
 local function backgroundLoop()
-    local timerId = os.startTimer(1.0)
+    local timerId = os.startTimer(0.5)
     local warnedLowHp = false
 
     while true do
@@ -331,12 +338,12 @@ local function backgroundLoop()
             refreshHud()
             local info = getOwnerData()
             if info.health and info.health > 0 and info.health <= 6 and not warnedLowHp then
-                aiSay("WARNING: Critical HP (" .. math.floor(info.health) .. ")! Heal up!", true)
+                aiSay("ALERTA: Vida critica (" .. math.floor(info.health) .. " HP)!", true)
                 warnedLowHp = true
             elseif info.health and info.health > 10 then
                 warnedLowHp = false
             end
-            timerId = os.startTimer(2.2)
+            timerId = os.startTimer(2.0)
 
         elseif ev == "chat" then
             local sender, message, isHidden
@@ -357,7 +364,7 @@ end
 local function terminalLoop()
     while true do
         if term.isColor() then term.setTextColor(colors.yellow) end
-        write("Ask AI > ")
+        write("J.A.R.V.I.S. > ")
         if term.isColor() then term.setTextColor(colors.white) end
         local input = read()
         if input and #input > 0 then
@@ -366,17 +373,22 @@ local function terminalLoop()
     end
 end
 
--- Boot Sequence
+-- Inicialização e Diagnóstico
 term.clear()
 term.setCursorPos(1, 1)
+
 if not overlay then
     if term.isColor() then term.setTextColor(colors.red) end
-    print("[!] Overlay Module NOT detected in Smart Glasses!")
-    print("Install an 'Overlay Module' in your glasses to see the on-screen HUD.")
+    print("[ERRO] Modulo 'advancedperipherals:overlay' nao encontrado!")
+    print("Verifica se colocaste o 'Overlay Module' dentro dos teus Smart Glasses.")
 else
-    local ok = initHud()
+    local created = initHud()
     refreshHud()
-    aiSay(ok and "Overlay HUD active on your screen!" or "Overlay found, initializing...")
+    if created then
+        aiSay("HUD ativo debaixo do teu minimapa!")
+    else
+        print("[AVISO] Overlay detetado, mas createObject falhou.")
+    end
 end
 
 parallel.waitForAny(backgroundLoop, terminalLoop)
