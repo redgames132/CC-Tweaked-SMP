@@ -179,4 +179,107 @@ local function refreshHud()
     setLine("header", 1, string.format("[%s] %s (%s)", AI_NAME, textutils.formatTime(t, false), phase), 0x00FFFF)
 
     local info = getOwnerData()
-    local hpStr = info.health and string.format(" |
+    local hpStr = info.health and string.format(" | HP:%d", math.floor(info.health)) or ""
+    local homeStr = ""
+    if homePos then
+        local dx, dz = homePos.x - info.x, homePos.z - info.z
+        homeStr = string.format(" | Casa:%dm", math.floor(math.sqrt(dx*dx + dz*dz)))
+    end
+    setLine("stats", 2, string.format("XYZ: %d, %d, %d%s%s", info.x, info.y, info.z, hpStr, homeStr), 0x55FF55)
+
+    local scanRes = scanNearbyOres()
+    if scanRes then
+        local col = scanRes:find("Nenhum") and 0xAAAAAA or 0xFFFF55
+        setLine("scanner", 3, scanRes, col)
+    end
+end
+
+-- 8. Processador de Comandos
+local function processCommand(rawText)
+    local cmd = rawText:lower():gsub("^%$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local info = getOwnerData()
+
+    if cmd == "help" then
+        aiSay("Cmds: status, ores, nv, set home, home, pos topo, pos mapa, hud")
+    elseif cmd == "status" or cmd == "oi" then
+        aiSay(string.format("Sistemas operacionais, %s! Pos: %d, %d, %d", info.name, info.x, info.y, info.z))
+    elseif cmd == "ores" or cmd == "scan" then
+        aiSay(scanNearbyOres() or "A arrefecer scanner...")
+    elseif cmd == "nv" then
+        if not nvModule then aiSay("Sem modulo de Visao Noturna!", true)
+        else
+            local _, cur = pcall(nvModule.isNightVisionEnabled)
+            pcall(function() nvModule.enableNightVision(not cur) end)
+            aiSay("Visao Noturna alternada com sucesso!")
+        end
+    elseif cmd == "set home" then
+        saveHome(info.x, info.y, info.z)
+        aiSay(string.format("Casa guardada em %d, %d, %d!", info.x, info.y, info.z))
+    elseif cmd == "home" then
+        if not homePos then aiSay("Usa 'set home' primeiro na tua base!", true)
+        else
+            local dx, dz = homePos.x - info.x, homePos.z - info.z
+            aiSay(string.format("Base a %dm (X:%d Z:%d)", math.floor(math.sqrt(dx*dx + dz*dz)), homePos.x, homePos.z))
+        end
+    elseif cmd == "pos mapa" then
+        hudX, hudY = 6, 148
+        clearHud()
+        refreshHud()
+        aiSay("HUD reposicionado debaixo do minimapa.")
+    elseif cmd == "pos topo" then
+        hudX, hudY = 300, 8
+        clearHud()
+        refreshHud()
+        aiSay("HUD reposicionado no canto superior direito.")
+    elseif cmd == "hud" then
+        hudVisible = not hudVisible
+        if not hudVisible then clearHud() else initHud() refreshHud() end
+        aiSay("Visibilidade do HUD alterada.")
+    else
+        aiSay("Comando nao reconhecido. Escreve 'help'.")
+    end
+end
+
+-- Inicialização
+clearHud()
+initHud()
+refreshHud()
+aiSay("J.A.R.V.I.S. online e pronto a ajudar!")
+
+-- Loops principais em background
+local function loopTimer()
+    local warnedHp = false
+    local warnedNight = false
+    while true do
+        sleep(2.0)
+        refreshHud()
+
+        local info = getOwnerData()
+        -- Alerta de vida crítica
+        if info.health and info.health > 0 and info.health <= 6 and not warnedHp then
+            aiSay("ALERTA: Vida critica (" .. math.floor(info.health) .. " HP)! Come algo!", true)
+            warnedHp = true
+        elseif info.health and info.health > 10 then
+            warnedHp = false
+        end
+
+        -- Alerta de anoitecer
+        local t = os.time()
+        if t >= 18.0 and t <= 18.5 and not warnedNight then
+            aiSay("Aviso: A noite esta a cair! Prepara as luzes.", true)
+            warnedNight = true
+        elseif t < 18.0 and t > 6.0 then
+            warnedNight = false
+        end
+    end
+end
+
+local function loopTerm()
+    while true do
+        write("J.A.R.V.I.S. > ")
+        local inp = read()
+        if inp and #inp > 0 then processCommand(inp) end
+    end
+end
+
+parallel.waitForAny(loopTimer, loopTerm)
