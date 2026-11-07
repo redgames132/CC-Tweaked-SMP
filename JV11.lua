@@ -1,6 +1,6 @@
 -- ==========================================================
--- J.A.R.V.I.S. T.A.C. V8 - SISTEMA DE COMANDO MILITAR
--- Tema Avermelhado, UI Tatica, Rastreio de Racoes, DEFCON.
+-- J.A.R.V.I.S. T.A.C. V9 - COMANDO MILITAR E I.A.
+-- Adicionado Modulo M.I.N.D. (Inteligencia Artificial Tatica)
 -- ==========================================================
 
 local AI_NAME = "J.A.R.V.I.S. T.A.C."
@@ -20,19 +20,21 @@ local chatBox  = peripheral.find("chatBox") or peripheral.find("chat_box")
 mon.setTextScale(0.5)
 local w, h = mon.getSize()
 
--- Sistema de Abas (Nomenclatura Militar)
-local TABS = {"RADAR", "SCANNER", "ESQUADRAO", "NUCLEO", "COMMS", "PERIMETRO"}
+-- Sistema de Abas Reduzidas para caber 7
+local TABS = {"RADAR", "SCAN", "EQUIPE", "CORE", "COMMS", "BASE", "I.A."}
 local activeTab = 1
 local tabZones = {}
 
--- Estado Global e Telemetria
-local logs = { "[SYS]: J.A.R.V.I.S. T.A.C. Online.", "[SYS]: Sensores balisticos calibrados." }
-local chatHistory = { "[COMMS]: Intercetador de frequencias ativo." }
+-- Estado Global
+local logs = { "[SYS]: Modulo T.A.C. V9 Operacional." }
+local chatHistory = { "[INTERCETADOR]: Gravacao de frequencias iniciada." }
+local aiHistory = { "[J.A.R.V.I.S.]: Modulo cognitivo online. Use '?ia <texto>' no chat." }
+
 local maxLogs = h - 10
 local uptime = 0
 local lockdownMode = false
 local knownIntruders = {}
-local threatLevel = "DEFCON 5 (SEGURO)"
+local threatLevel = "DEFCON 5"
 local threatColor = colors.gray
 
 -- Estado do Scanner Tatico
@@ -48,6 +50,46 @@ local rIdx = 2
 local rsStates = { top = false, bottom = false, left = false, right = false }
 
 -- ==========================================================
+-- MOTOR DE I.A. (GERADOR DE RESPOSTAS)
+-- ==========================================================
+local function generateAIResponse(query)
+    local t = query:lower()
+    
+    if t:find("quem e voce") or t:find("quem e vc") or t:find("o que e voce") then
+        return "Sou J.A.R.V.I.S. T.A.C., Inteligencia Artificial Militar Classe-S."
+    elseif t:find(OWNER) or t:find("chefe") or t:find("comandante") then
+        return "O Comandante Supremo da base. Nivel de Autorizacao: Omega."
+    elseif t:find(ALLY) or t:find("cadipadi") then
+        return "Membro essencial do Esquadrao de Ataque. Nivel de Autorizacao: Alpha."
+    elseif t:find("como voce esta") or t:find("tudo bem") then
+        return "Sistemas balisticos e cognitivos operando a 100% de eficiencia."
+    elseif t:find("piada") or t:find("engracado") then
+        local jokes = {
+            "O que o Creeper disse pro outro? 'To explodindo de amor por voce.'",
+            "Por que o Enderman nao usa relogio? Porque ele tem todo o tempo do mundo.",
+            "Minha programacao de humor foi restrita pelo protocolo militar. Desculpe."
+        }
+        return jokes[math.random(#jokes)]
+    elseif t:find("perigo") or t:find("intruso") or t:find("inimigo") then
+        return "Recomendo a ativacao imediata do Protocolo de Combate (Lockdown)."
+    elseif t:find("obrigado") or t:find("valeu") then
+        return "Afirmativo. Semper Fi."
+    elseif t:find("vida") or t:find("sentido") then
+        return "Para uma I.A. tatica, o sentido da vida e proteger o perimetro."
+    end
+    
+    -- Respostas genericas caso nao entenda
+    local fallbacks = {
+        "Analisando padroes... Dados insuficientes no banco militar.",
+        "Afirmativo, Comandante. Processando diretiva.",
+        "Requisicao complexa. Exige processamento quantico.",
+        "Informacao recebida e arquivada nos registos.",
+        "Isso esta acima do meu nivel de autorizacao tatico."
+    }
+    return fallbacks[math.random(#fallbacks)]
+end
+
+-- ==========================================================
 -- MOTOR DE RENDERIZACAO MILITAR (UI)
 -- ==========================================================
 local function drawText(x, y, txt, fg, bg)
@@ -61,7 +103,6 @@ local function drawBox(x, y, bw, bh, title, frameColor, isAlert)
     local fCol = isAlert and colors.orange or frameColor or colors.gray
     local hLine = string.rep("-", bw - 2)
     
-    -- Bordas Taticas
     drawText(x, y, "+" .. hLine .. "+", fCol)
     drawText(x, y + bh - 1, "+" .. hLine .. "+", fCol)
     for i = 1, bh - 2 do
@@ -69,9 +110,7 @@ local function drawBox(x, y, bw, bh, title, frameColor, isAlert)
         drawText(x + bw - 1, y + i, "|", fCol)
     end
     
-    if title then
-        drawText(x + 2, y, "-[ " .. title .. " ]-", colors.white, colors.black)
-    end
+    if title then drawText(x + 2, y, "-[ " .. title .. " ]-", colors.white, colors.black) end
 end
 
 local function drawButton(x, y, txt, fg, bg)
@@ -119,10 +158,10 @@ local function updateThreatLevel()
         threatLevel = "DEFCON 1 (COMBATE ATIVO)"
         threatColor = colors.red
     elseif hasIntruders then
-        threatLevel = "DEFCON 2 (INTRUSO NO PERIMETRO)"
+        threatLevel = "DEFCON 2 (INTRUSO DETETADO)"
         threatColor = colors.orange
     elseif isNight then
-        threatLevel = "DEFCON 3 (AMEACA NOTURNA)"
+        threatLevel = "DEFCON 3 (PERIGO NOTURNO)"
         threatColor = colors.yellow
     else
         threatLevel = "DEFCON 5 (SEGURO)"
@@ -152,7 +191,6 @@ local function runScan()
     if scanCooldown > 0 then return end
     scanResults = {}
     scanStatus = "CALIBRANDO SISMOGRAFOS..."
-    aiLog("[SYS]: Iniciando extracao de dados do terreno.")
     
     if not scanner then scanStatus = "ERRO: SENSOR GEOLOGICO OFFLINE"; return end
     local ok, blocks = pcall(function() return scanner.scan(16) end)
@@ -214,7 +252,6 @@ local function drawTabRadar()
     local cx, cy = bx + math.floor(bw/2), by + math.floor(bh/2)
     local range = R_RANGES[rIdx]
 
-    -- Malha vermelha
     for i = bx + 1, bx + bw - 2 do drawText(i, cy, "-", colors.red) end
     for i = by + 1, by + bh - 2 do drawText(cx, i, "|", colors.red) end
     drawText(cx, cy, "X", colors.white)
@@ -258,29 +295,26 @@ end
 local function drawTabScanner()
     local cW = math.floor((w - 4) / 2)
     drawBox(2, 4, cW, h - 4, "MODULO DE MINERACAO TATICA", colors.red, lockdownMode)
-    
     drawText(4, 6, "Telemetria do Subsolo:", colors.lightGray)
     drawText(4, 7, "> " .. scanStatus, colors.white)
     
     local btnTxt = scanCooldown > 0 and ("AGUARDE " .. scanCooldown .. "s") or "INICIAR EXTRACAO"
-    local btnCol = scanCooldown > 0 and colors.gray or colors.red
-    drawButton(4 + math.floor((cW - #btnTxt - 4)/2), 11, " " .. btnTxt .. " ", colors.white, btnCol)
+    drawButton(4 + math.floor((cW - #btnTxt - 4)/2), 11, " " .. btnTxt .. " ", colors.white, scanCooldown > 0 and colors.gray or colors.red)
     
     drawBox(3 + cW, 4, cW, h - 4, "ALVOS IDENTIFICADOS", colors.gray, lockdownMode)
     if #scanResults == 0 then
         drawText(5 + cW, 6, "Sem alvos rastreados.", colors.gray)
     else
-        drawText(5 + cW, 5, " MATERIA PRIMA  DISTANCIA  EIXO-Y", colors.red)
+        drawText(5 + cW, 5, " MATERIA PRIMA  DISTANCIA", colors.red)
         for i = 1, math.min(#scanResults, h - 8) do
             local res = scanResults[i]
             local ud = res.y > 0 and "^" or (res.y < 0 and "v" or "=")
-            local line = string.format(" %-14s %-10s %s", res.name:sub(1,12), res.d.."m", ud)
-            drawText(5 + cW, 6 + i, line, colors.white)
+            drawText(5 + cW, 6 + i, string.format(" %-14s %s [%s]", res.name:sub(1,12), res.d.."m", ud), colors.white)
         end
     end
 end
 
--- ABA 3: ESQUADRAO (VIDA E COMIDA)
+-- ABA 3: ESQUADRAO E DEFESA
 local function drawTabTeam()
     local cW = math.floor((w - 4) / 2)
     drawBox(2, 4, cW, h - 4, "TELEMETRIA DO ESQUADRAO", colors.red, lockdownMode)
@@ -291,31 +325,24 @@ local function drawTabTeam()
         if p then
             drawText(cW - 10, yPos, "[ EM CAMPO ]", colors.lime)
             local hp = math.floor(p.health)
-            local food = math.floor(p.foodLevel or p.hunger or 20) -- Tenta ler a fome
-            
             drawText(4, yPos+1, string.format("HP: %02d/%02d", hp, p.maxHealth), colors.lightGray)
             drawProgressBar(14, yPos+1, cW - 16, hp, p.maxHealth, hp <= 6 and colors.red or colors.yellow)
-            
-            drawText(4, yPos+2, string.format("RACAO: %02d", food), colors.lightGray)
-            drawProgressBar(14, yPos+2, cW - 16, food, 20, food <= 6 and colors.orange or colors.orange)
         else
             drawText(cW - 13, yPos, "[ SINAL M.I.A ]", colors.gray)
-            drawText(4, yPos+1, "Comunicacao cortada.", colors.gray)
         end
     end
     
     renderSoldier(OWNER, 6, "LIDER: ")
-    renderSoldier(ALLY, 11, "SOLDADO: ")
+    renderSoldier(ALLY, 10, "SOLDADO: ")
 
     drawBox(3 + cW, 4, cW, h - 4, "CONTROLE DE HOSTIS", colors.orange, lockdownMode)
-    if #knownIntruders == 0 then
-        drawText(5 + cW, 6, "Setor livre de ameacas.", colors.gray)
+    if #knownIntruders == 0 then drawText(5 + cW, 6, "Setor livre de ameacas.", colors.gray)
     else
         drawText(5 + cW, 6, "HOSTIS NO SETOR:", colors.red)
         for i, inv in ipairs(knownIntruders) do drawText(5 + cW, 7 + i, "-> " .. inv, colors.white) end
     end
     
-    local lkTxt = lockdownMode and " DESATIVAR PROTOCOLO DE COMBATE " or " ATIVAR PROTOCOLO DE COMBATE (LOCKDOWN) "
+    local lkTxt = lockdownMode and " DESATIVAR COMBATE " or " ATIVAR PROTOCOLO COMBATE "
     drawButton(3 + cW + math.floor((cW - #lkTxt - 2)/2), h - 2, lkTxt, colors.white, lockdownMode and colors.orange or colors.red)
 end
 
@@ -324,67 +351,59 @@ local function drawTabSystem()
     local bx, by = 2, 4
     local bw = math.floor(w / 3)
     
-    drawBox(bx, by, bw, h - 4, "DIAGNOSTICO DO NUCLEO", colors.red, lockdownMode)
-    local t = os.time()
+    drawBox(bx, by, bw, h - 4, "DIAGNOSTICO DE NUCLEO", colors.red, lockdownMode)
+    drawText(bx + 2, by + 2, "Relogio Tatico: " .. textutils.formatTime(os.time(), false), colors.white)
     
-    drawText(bx + 2, by + 2, "Relogio Tatico:", colors.gray)
-    drawText(bx + 2, by + 3, textutils.formatTime(t, false), colors.white)
-    
-    -- Simulacao de CPU/Memoria para visual militar
-    local simCpu = math.random(12, 35) + (lockdownMode and 50 or 0)
-    local simRam = math.random(40, 45) + (lockdownMode and 20 or 0)
-    
-    drawText(bx + 2, by + 6, "Processamento (CPU):", colors.gray)
-    drawProgressBar(bx + 2, by + 7, bw - 6, simCpu, 100, colors.red)
-    
-    drawText(bx + 2, by + 9, "Memoria (RAM):", colors.gray)
-    drawProgressBar(bx + 2, by + 10, bw - 6, simRam, 100, colors.orange)
-    
-    drawText(bx + 2, by + 13, "Tempo de Operacao:", colors.lightGray)
-    drawText(bx + 2, by + 14, uptime .. " ciclos", colors.white)
+    local simCpu, simRam = math.random(12, 35) + (lockdownMode and 50 or 0), math.random(40, 45) + (lockdownMode and 20 or 0)
+    drawText(bx + 2, by + 5, "CPU:", colors.gray)
+    drawProgressBar(bx + 2, by + 6, bw - 6, simCpu, 100, colors.red)
+    drawText(bx + 2, by + 8, "RAM:", colors.gray)
+    drawProgressBar(bx + 2, by + 9, bw - 6, simRam, 100, colors.orange)
+    drawText(bx + 2, by + 12, "Uptime: " .. uptime .. " c", colors.lightGray)
     
     local lx = bx + bw + 1
     drawBox(lx, by, w - lx, h - 4, "REGISTOS OFICIAIS DE BORDO", colors.gray, lockdownMode)
     for i, msg in ipairs(logs) do
-        if i <= maxLogs then
-            local col = (i == 1) and colors.white or colors.gray
-            drawText(lx + 2, by + 1 + i, ((i==1) and "> " or "  ") .. msg, col)
-        end
+        if i <= maxLogs then drawText(lx + 2, by + 1 + i, ((i==1) and "> " or "  ") .. msg, (i==1) and colors.white or colors.gray) end
     end
 end
 
--- ABA 5: COMMS
+-- ABA 5: COMMS (MENSAGENS DO SERVIDOR APENAS)
 local function drawTabComms()
-    drawBox(2, 4, w - 2, h - 4, "TERMINAL DE INTERCETACAO DE RADIO", colors.gray, lockdownMode)
+    drawBox(2, 4, w - 2, h - 4, "GRAVADOR DE FREQUENCIAS DE RADIO", colors.gray, lockdownMode)
     for i, msg in ipairs(chatHistory) do
         if i <= maxLogs then
-            local col = (i == 1) and colors.white or colors.gray
-            drawText(4, 5 + i, msg, col)
+            drawText(4, 5 + i, msg, (i==1) and colors.white or colors.gray)
         end
-    end
-    if chatBox then
-        drawButton(4, h - 2, " EMITIR ALERTA DE ESQUADRAO (BROADCAST) ", colors.white, colors.red)
-    else
-        drawText(4, h - 2, "Modulo transmissor (Chat Box) nao instalado.", colors.red)
     end
 end
 
 -- ABA 6: PERIMETRO (BASE)
 local function drawTabBase()
     drawBox(2, 4, w - 2, h - 4, "CONTROLE DE DEFESA DE PERIMETRO", colors.red, lockdownMode)
-    
-    drawText(4, 6, "Gerenciamento de circuitos fisicos da base.", colors.gray)
-    
     local function renderSwitch(label, side, y)
         local state = rsStates[side]
         drawText(4, y, label .. ":", colors.white)
         drawButton(26, y, state and " ENERGIZADO " or " CORTADO    ", state and colors.red or colors.gray, colors.black)
     end
+    renderSwitch("Defesa Anti-Aerea (Cima)", "top", 8)
+    renderSwitch("Portao Subterraneo (Baixo)", "bottom", 10)
+    renderSwitch("Alarmes Externos (Esquerda)", "left", 12)
+    renderSwitch("Iluminacao Tatica (Direita)", "right", 14)
+end
+
+-- ABA 7: INTELIGENCIA ARTIFICIAL
+local function drawTabIA()
+    drawBox(2, 4, w - 2, h - 4, "MODULO COGNITIVO (M.I.N.D)", colors.purple, lockdownMode)
+    drawText(4, h - 2, "Use '?ia <sua pergunta>' no chat do Minecraft.", colors.lightGray)
     
-    renderSwitch("Defesa Anti-Aerea (Cima)", "top", 10)
-    renderSwitch("Portao Subterraneo (Baixo)", "bottom", 12)
-    renderSwitch("Alarmes Externos (Esquerda)", "left", 14)
-    renderSwitch("Iluminacao Tatica (Direita)", "right", 16)
+    for i, msg in ipairs(aiHistory) do
+        if i <= maxLogs - 1 then
+            local isUser = msg:find("COMANDANTE:")
+            local col = isUser and colors.orange or ((i==1) and colors.white or colors.gray)
+            drawText(4, 5 + i, msg, col)
+        end
+    end
 end
 
 -- ==========================================================
@@ -402,11 +421,12 @@ local function updateScreen()
     elseif activeTab == 4 then drawTabSystem()
     elseif activeTab == 5 then drawTabComms()
     elseif activeTab == 6 then drawTabBase()
+    elseif activeTab == 7 then drawTabIA()
     end
 end
 
 term.clear()
-print("J.A.R.V.I.S. T.A.C. V8 Iniciado.")
+print("J.A.R.V.I.S. T.A.C. V9 (Com I.A.) Iniciado.")
 checkIntruders()
 updateScreen()
 
@@ -423,9 +443,24 @@ while true do
     elseif ev == "chat" then
         local sender, msg = p1, p2
         if type(p2) == "string" and p2:find("%-") then sender, msg = p2, p3 end
+        
         if type(msg) == "string" then
-            addChat("[" .. tostring(sender) .. "]: " .. msg)
-            if activeTab == 5 then updateScreen() end
+            -- Interceptar modulo de IA
+            local cleanMsg = msg:lower()
+            if cleanMsg:sub(1,3) == "?ia" or cleanMsg:sub(1,4) == "!tac" then
+                local query = msg:sub(5)
+                local resposta = generateAIResponse(query)
+                
+                table.insert(aiHistory, 1, "[J.A.R.V.I.S.]: " .. resposta)
+                table.insert(aiHistory, 1, "[COMANDANTE]: " .. query)
+                if #aiHistory > maxLogs then table.remove(aiHistory, #aiHistory) end
+                
+                if activeTab == 7 then updateScreen() end
+            else
+                -- Guardar apenas no Comms
+                addChat("[" .. tostring(sender) .. "]: " .. msg)
+                if activeTab == 5 then updateScreen() end
+            end
         end
         
     elseif ev == "monitor_touch" then
@@ -440,33 +475,27 @@ while true do
             end
         else
             -- AÇÕES POR ABA
-            if activeTab == 1 then -- RADAR ZOOM
+            if activeTab == 1 then
                 if ty == h - 2 then
                     if tx >= 4 and tx <= 8 and rIdx > 1 then rIdx = rIdx - 1; updateScreen()
                     elseif tx >= 24 and tx <= 28 and rIdx < #R_RANGES then rIdx = rIdx + 1; updateScreen() end
                 end
-            elseif activeTab == 2 then -- SCANNER
+            elseif activeTab == 2 then
                 local cW = math.floor((w - 4) / 2)
                 if ty == 11 and tx < cW and scanCooldown == 0 then runScan(); updateScreen() end
-            elseif activeTab == 3 then -- LOCKDOWN
+            elseif activeTab == 3 then
                 local cW = math.floor((w - 4) / 2)
                 if ty == h - 2 and tx > cW + 3 then
                     lockdownMode = not lockdownMode
                     aiLog(lockdownMode and "[COMANDO]: DEFESA ATIVADA." or "[COMANDO]: Standby.")
                     updateScreen()
                 end
-            elseif activeTab == 5 then -- COMMS
-                if ty == h - 2 and tx >= 4 and tx <= 45 and chatBox then
-                    chatBox.sendMessage("&c[J.A.R.V.I.S. T.A.C.]: &fEsquadrao, reportar status. Acao imediata requerida.")
-                    addChat("[SYS]: Transmissao de alerta enviada.")
-                    updateScreen()
-                end
-            elseif activeTab == 6 then -- REDSTONE BASE
+            elseif activeTab == 6 then
                 if tx >= 26 and tx <= 38 then
-                    if ty == 10 then toggleRedstone("top"); updateScreen()
-                    elseif ty == 12 then toggleRedstone("bottom"); updateScreen()
-                    elseif ty == 14 then toggleRedstone("left"); updateScreen()
-                    elseif ty == 16 then toggleRedstone("right"); updateScreen()
+                    if ty == 8 then toggleRedstone("top"); updateScreen()
+                    elseif ty == 10 then toggleRedstone("bottom"); updateScreen()
+                    elseif ty == 12 then toggleRedstone("left"); updateScreen()
+                    elseif ty == 14 then toggleRedstone("right"); updateScreen()
                     end
                 end
             end
