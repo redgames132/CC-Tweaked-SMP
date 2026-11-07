@@ -1,168 +1,143 @@
 -- ==========================================================
--- J.A.R.V.I.S. - Versão Chat Box (Compatível com Iris/Shaders)
--- Minecraft 1.21.1 NeoForge
+-- J.A.R.V.I.S. HUD - Redesenho Contínuo (Anti-Erros)
+-- Compatível com Canvas API e createObject (AP 0.8+)
 -- ==========================================================
 
 local AI_NAME = "J.A.R.V.I.S."
-local HOME_FILE = "ai_home.txt"
+local ar = peripheral.find("arController") or peripheral.find("overlay")
 
--- Detecção de Periféricos
-local chatBox = peripheral.find("chat_box") or peripheral.find("chatBox")
-local scanner = peripheral.find("geo_scanner") or peripheral.find("geoScanner")
-local nvModule = nil
+-- Fallback caso seja executado diretamente nos smartglasses
+if not ar and smartglasses then ar = smartglasses end
+if not ar then error("ERRO: Modulo Overlay ou AR Controller ausente!", 0) end
 
-if smartglasses and smartglasses.modules then
-    nvModule = smartglasses.modules["advancedperipherals:night_vision"] or smartglasses.modules.night_vision
-end
+local scanner = peripheral.find("geoScanner") or peripheral.find("geo_scanner")
+local chatBox = peripheral.find("chatBox") or peripheral.find("chat_box")
 
-if not chatBox then
-    error("ERRO: Você precisa colocar um Chat Box nos óculos para esta versão funcionar!", 0)
-end
+-- Posições base do HUD (Abaixo do minimapa)
+local hX, hY = 6, 148
+local lastMsg = "Sistemas prontos."
 
--- Função central de comunicação (Toast + Chat Privado + Action Bar)
-local function aiAlert(title, message, isUrgent)
-    local titleCol = isUrgent and "red" or "aqua"
+-- Função robusta para desenhar texto em qualquer versão do AP
+local function drawLine(txt, yOffset, rgb)
+    local finalY = hY + yOffset
     
-    -- 1. Notificação estilo "Conquista" no canto da tela
-    pcall(function()
-        chatBox.sendToast({
-            title = AI_NAME .. " - " .. title,
-            message = message,
-            titleColor = titleCol,
-            messageColor = "white"
-        })
+    -- Tenta desenhar usando a Canvas API moderna (ARGB)
+    local canvasOk = pcall(function()
+        ar.canvas().addText({x = hX, y = finalY}, txt, 0xFF000000 + rgb)
     end)
     
-    -- 2. Mensagem flutuante acima da barra de vida/fome
-    pcall(function()
-        chatBox.sendActionBar("&b[" .. AI_NAME .. "] &f" .. message)
-    end)
-
-    -- 3. Mensagem no chat in-game (escondida dos outros)
-    pcall(function()
-        chatBox.sendMessage("&b[" .. AI_NAME .. "] &f" .. message)
-    end)
-    
-    print("[" .. AI_NAME .. "] " .. message)
+    -- Se a Canvas API falhar, usa o sistema antigo (createObject)
+    if not canvasOk then
+        pcall(function()
+            ar.createObject("text", {text = txt, x = hX, y = finalY, color = rgb, gui = true})
+        end)
+    end
 end
 
--- Sistema de Waypoint
-local homePos = nil
-if fs.exists(HOME_FILE) then
-    local f = fs.open(HOME_FILE, "r")
-    homePos = textutils.unserialize(f.readAll())
-    f.close()
-end
-
--- Dados do Jogador
-local ownerName = "Boss"
-local function getOwnerData()
-    if smartglasses and smartglasses.getOwner then
-        local ok, data = pcall(smartglasses.getOwner)
-        if ok and type(data) == "table" then
-            ownerName = data.name or ownerName
-            return {
-                x = math.floor(data.x or 0), y = math.floor(data.y or 0), z = math.floor(data.z or 0),
-                health = data.health, maxHealth = data.maxHealth or 20
-            }
+-- Obtém os dados do jogador
+local function getOwner()
+    local info = { x = 0, y = 0, z = 0, hp = 20 }
+    if ar.getOwner then
+        local ok, d = pcall(ar.getOwner)
+        if ok and type(d) == "table" then
+            info.x = math.floor(d.x or d.yaw or 0)
+            info.y = math.floor(d.y or d.pitch or 0)
+            info.z = math.floor(d.z or 0)
+            info.hp = d.health or 20
         end
     end
-    return { x = 0, y = 0, z = 0, health = 20, maxHealth = 20 }
+    return info
 end
 
--- Scanner Automático
-local RARE_ORES = {"ancient_debris", "uranium", "osmium", "diamond", "emerald", "fluorite", "zinc", "gold"}
-local function scanOres()
-    if not scanner then return end
-    local scanFn = scanner.scanBlocks or scanner.scan
-    if not scanFn then return end
-
-    local ok, blocks = pcall(function() return scanFn(8) end)
-    if not ok or type(blocks) ~= "table" then return end
-
-    local best, bestDist = nil, 999
-    for _, b in ipairs(blocks) do
-        local name = (b.name or ""):lower()
-        for _, key in ipairs(RARE_ORES) do
-            if name:find(key) then
-                local dist = math.abs(b.x or 0) + math.abs(b.y or 0) + math.abs(b.z or 0)
-                if dist < bestDist then
-                    bestDist = dist
-                    best = { name = key:gsub("_ore", ""):upper(), x = b.x, y = b.y, z = b.z }
+-- Varrer minérios e encontrar o mais próximo
+local RARE = {"ancient_debris","uranium","osmium","diamond","emerald","fluorite","zinc"}
+local function getScan()
+    if not scanner then return "Sem Geo Scanner" end
+    local fn = scanner.scanBlocks or scanner.scan
+    if not fn then return "Scanner Indisponivel" end
+    
+    local ok, b = pcall(function() return fn(8) end)
+    if not ok or type(b) ~= "table" then return "A varrer arredores..." end
+    
+    local best, minDist = nil, 999
+    for _, block in ipairs(b) do
+        local n = (block.name or ""):lower()
+        for _, r in ipairs(RARE) do
+            if n:find(r) then
+                local dist = math.abs(block.x or 0) + math.abs(block.y or 0) + math.abs(block.z or 0)
+                if dist < minDist then
+                    minDist = dist
+                    best = { n = r:upper(), x = block.x, y = block.y, z = block.z }
                 end
-                break
             end
         end
     end
-
+    
     if best then
         local ud = best.y > 0 and "Acima" or (best.y < 0 and "Abaixo" or "Lado")
-        aiAlert("Minério Detectado", string.format("%s perto! Olhe para %s.", best.name, ud), false)
+        return string.format("ALVO: %s (%s)", best.n, ud)
+    end
+    return "Nenhum minerio raro (8m)"
+end
+
+-- Limpa tudo e redesenha o ecrã inteiro do zero
+local function updateHUD()
+    -- Tenta limpar de todas as formas possíveis
+    pcall(function() if ar.clear then ar.clear() end end)
+    pcall(function() if ar.canvas then ar.canvas().clear() end end)
+    
+    local info = getOwner()
+    
+    -- Desenha as 4 linhas do HUD
+    drawLine(string.format("[%s] Overlay Ativo", AI_NAME), 0, 0x00FFFF)
+    drawLine(string.format("XYZ: %d %d %d | HP: %d", info.x, info.y, info.z, math.floor(info.hp)), 12, 0x55FF55)
+    drawLine(getScan(), 24, 0xFFFF55)
+    drawLine("> " .. lastMsg, 36, 0xFFFFFF)
+    
+    -- Sincroniza e envia pacote para o jogador
+    if ar.sync then pcall(ar.sync) end
+end
+
+-- Sistema de Mensagens
+local function aiSay(msg)
+    lastMsg = msg
+    updateHUD()
+    if chatBox then
+        pcall(function() chatBox.sendMessage("&b["..AI_NAME.."] &f"..msg) end)
     end
 end
 
--- Comandos In-Game
-local function processCommand(cmd)
-    local info = getOwnerData()
-    cmd = cmd:lower():gsub("^%$", "")
-
-    if cmd == "status" then
-        aiAlert("Status", string.format("Vida: %d/%d | Pos: %d %d %d", info.health, info.maxHealth, info.x, info.y, info.z), false)
-    elseif cmd == "nv" then
-        if nvModule then
-            local _, cur = pcall(nvModule.isNightVisionEnabled)
-            pcall(function() nvModule.enableNightVision(not cur) end)
-            aiAlert("Hardware", "Visão Noturna alterada.", false)
-        end
-    elseif cmd == "scan" or cmd == "ores" then
-        scanOres()
-    elseif cmd == "sethome" then
-        homePos = { x = info.x, y = info.y, z = info.z }
-        local f = fs.open(HOME_FILE, "w")
-        f.write(textutils.serialize(homePos))
-        f.close()
-        aiAlert("GPS", "Base salva com sucesso!", false)
-    elseif cmd == "home" then
-        if homePos then
-            local dist = math.floor(math.sqrt((homePos.x - info.x)^2 + (homePos.z - info.z)^2))
-            aiAlert("GPS", string.format("Sua base está a %dm de distância.", dist), false)
-        else
-            aiAlert("Erro", "Você não salvou nenhuma base.", true)
-        end
-    end
-end
-
--- Loops Principais
+-- ==========================================================
+-- LOOP PRINCIPAL
+-- ==========================================================
 term.clear()
-aiAlert("Boot Sequence", "Sistemas J.A.R.V.I.S. inicializados.", false)
+print("J.A.R.V.I.S. Overlay Iniciado.")
+print("Escreva os comandos no chat usando '$'. Ex: $pos topo")
+updateHUD()
 
-local function loopBackground()
-    local warnedHp = false
-    while true do
-        sleep(5)
-        local info = getOwnerData()
+while true do
+    local tid = os.startTimer(2.0)
+    local ev, p1, p2, p3 = os.pullEvent()
+    
+    if ev == "timer" and p1 == tid then
+        updateHUD()
         
-        -- Auto-Scan a cada 5 segundos
-        if math.random() > 0.5 then scanOres() end
-
-        -- Alerta de Vida
-        if info.health and info.health <= 6 and not warnedHp then
-            aiAlert("PERIGO", "Sinais vitais críticos! Procure abrigo.", true)
-            warnedHp = true
-        elseif info.health and info.health > 10 then
-            warnedHp = false
-        end
-    end
-end
-
-local function loopChat()
-    while true do
-        local ev, sender, msg = os.pullEvent("chat")
-        -- Se a mensagem começar com $ (ex: $status, $nv, $home)
+    elseif ev == "chat" then
+        local msg = type(p2) == "string" and p2 or p3
         if type(msg) == "string" and msg:sub(1, 1) == "$" then
-            processCommand(msg)
+            local cmd = msg:sub(2):lower()
+            if cmd == "pos topo" then
+                hX, hY = 300, 8
+                aiSay("Movido para o topo.")
+            elseif cmd == "pos mapa" then
+                hX, hY = 6, 148
+                aiSay("Movido para baixo do mapa.")
+            elseif cmd == "nv" then
+                -- Fallback se tiver modulo de night vision manual
+                aiSay("Comando NV recebido.")
+            else
+                aiSay("Comando: " .. cmd)
+            end
         end
     end
 end
-
-parallel.waitForAny(loopBackground, loopChat)
