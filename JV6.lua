@@ -1,6 +1,6 @@
 -- ==========================================================
--- J.A.R.V.I.S. MAINFRAME V5 - RADAR TATICO VISUAL
--- Removido texto de posicoes, adicionado Radar Azul e Equipa.
+-- J.A.R.V.I.S. MAINFRAME V6 - WIDESCREEN (4x3)
+-- 3 Colunas, Radar Tatico com Zoom Ajustavel, Equipa
 -- ==========================================================
 
 local AI_NAME = "J.A.R.V.I.S. OS"
@@ -12,25 +12,34 @@ local TEAM = {
     [ALLY] = true
 }
 
+-- Opcoes de Distancia do Radar
+local R_RANGES = {16, 32, 64, 128, 256}
+local rIdx = 2 -- Comeca nos 32m
+
 -- Conectar Perifericos
 local mon = peripheral.find("monitor")
 if not mon then error("ERRO: Nenhum monitor ligado!", 0) end
 local detector = peripheral.find("playerDetector") or peripheral.find("player_detector")
 
--- Configurar Ecra
+-- Configurar Ecra (Alta Resolucao)
 mon.setTextScale(0.5)
 local w, h = mon.getSize()
-local colW = math.floor((w - 3) / 2)
 
--- Estado do Sistema
-local logs = { "Radar visual online.", "Bem-vindos, " .. OWNER .. " e " .. ALLY .. "." }
-local maxLogs = 5
+-- Divisao em 3 Colunas Dinamicas
+local colW = math.floor((w - 5) / 3)
+local c1X = 2
+local c2X = c1X + colW + 1
+local c3X = c2X + colW + 1
+
+-- Variaveis de Estado
+local logs = { "Layout Panoramico 4x3 carregado.", "Controles de Zoom do radar desbloqueados." }
+local maxLogs = h - 17
 local uptime = 0
 local lockdownMode = false
 local knownIntruders = {}
 
 -- ==========================================================
--- FUNCOES DE DESENHO (UI)
+-- FUNCOES DE DESENHO BASE
 -- ==========================================================
 local function drawText(x, y, txt, fg, bg)
     mon.setCursorPos(x, y)
@@ -77,27 +86,29 @@ local function getPlayerStats(playerName)
 end
 
 -- ==========================================================
--- RADAR TATICO (DESENHO VISUAL)
+-- RENDERIZACAO DO RADAR (COM ZOOM DINAMICO)
 -- ==========================================================
 local function drawRadar(bx, by, bw, bh)
     drawBox(bx, by, bw, bh, " RADAR TATICO ", colors.blue)
     local cx = bx + math.floor(bw/2)
     local cy = by + math.floor(bh/2)
+    local currentRange = R_RANGES[rIdx]
 
-    -- Eixos (Cruz Central)
+    -- Desenhar Cruz Central
     for i = bx + 1, bx + bw - 2 do drawText(i, cy, "-", colors.cyan) end
     for i = by + 1, by + bh - 2 do drawText(cx, i, "|", colors.cyan) end
     drawText(cx, cy, "+", colors.white)
 
-    -- Circulos Concentricos (Simulacao)
+    -- Aneis Concentricos (Ajuste de Aspect Ratio do texto)
+    local aspect = 2.0 -- Texto é 2x mais alto que largo
     for iy = by + 1, by + bh - 2 do
         for ix = bx + 1, bx + bw - 2 do
-            local dx = ix - cx
-            local dy = (iy - cy) * 2 -- Multiplica por 2 para corrigir a altura dos caracteres
-            local dist = math.sqrt(dx*dx + dy*dy)
+            local rx = (ix - cx) / (bw/2 - 1)
+            local ry = (iy - cy) / (bh/2 - 1) * aspect
+            local dist = math.sqrt(rx*rx + ry*ry)
             
-            -- Desenha 3 aneis azuis como na imagem
-            if math.abs(dist - 5) < 0.8 or math.abs(dist - 10) < 0.8 or math.abs(dist - 15) < 0.8 then
+            -- 3 Aneis em 33%, 66% e 100% da caixa
+            if math.abs(dist - 0.33) < 0.1 or math.abs(dist - 0.66) < 0.1 or math.abs(dist - 0.99) < 0.1 then
                 if ix ~= cx and iy ~= cy then
                     drawText(ix, iy, ".", colors.lightBlue)
                 end
@@ -105,7 +116,7 @@ local function drawRadar(bx, by, bw, bh)
         end
     end
 
-    -- Plotar Jogadores no Radar
+    -- Plotar Jogadores
     local refPos = getPlayerStats(OWNER) or getPlayerStats(ALLY)
     if refPos and detector then
         local ok, players = pcall(detector.getOnlinePlayers)
@@ -113,21 +124,20 @@ local function drawRadar(bx, by, bw, bh)
             for _, p in ipairs(players) do
                 local st = getPlayerStats(p)
                 if st then
-                    -- Escala: 1 caractere = 6 blocos de distancia
-                    local dx = math.floor((st.x - refPos.x) / 6)
-                    local dz = math.floor((st.z - refPos.z) / 6)
-                    local mx = cx + dx
-                    local my = cy + math.floor(dz / 2)
+                    -- Calcular posicao relativa ao limite (Range)
+                    local relX = st.x - refPos.x
+                    local relZ = st.z - refPos.z
+                    
+                    -- Mapear para o ecra
+                    local px = cx + math.floor((relX / currentRange) * (bw/2 - 2))
+                    local py = cy + math.floor((relZ / currentRange) * (bh/2 - 2))
 
-                    -- Se o ponto estiver dentro da caixa do radar
-                    if mx > bx and mx < bx + bw - 1 and my > by and my < by + bh - 1 then
-                        local char = "!"
-                        local col = colors.red
+                    -- Se estiver dentro do radar, desenha
+                    if px > bx and px < bx + bw - 1 and py > by and py < by + bh - 1 then
+                        local char, col = "!", colors.red
                         if p == OWNER then char = "@"; col = colors.lime
                         elseif p == ALLY then char = "+"; col = colors.lime end
-                        
-                        -- Fundo preto para o icone nao sobrepor a linha feio
-                        drawText(mx, my, char, col, colors.black)
+                        drawText(px, py, char, col, colors.black)
                     end
                 end
             end
@@ -136,101 +146,104 @@ local function drawRadar(bx, by, bw, bh)
 end
 
 -- ==========================================================
--- RENDERIZACAO DO DASHBOARD
+-- RENDERIZACAO PRINCIPAL
 -- ==========================================================
 local function updateDashboard()
     mon.setBackgroundColor(colors.black)
     mon.clear()
     
-    -- MODO LOCKDOWN
     local themeColor = lockdownMode and colors.red or colors.cyan
     local headerTitle = lockdownMode and " === [ ALERTA VERMELHO - LOCKDOWN ] === " or string.format(" === [ %s ] === ", AI_NAME)
     drawText(math.floor((w - #headerTitle)/2), 2, headerTitle, themeColor)
     
-    -- QUADRANTE 1: RADAR VISUAL (Top Esquerda)
-    drawRadar(2, 4, colW, 11)
-
-    -- QUADRANTE 2: STATUS DA EQUIPA (Top Direita)
-    local q2X = 2 + colW + 1
-    drawBox(q2X, 4, colW, 11, " SINAIS VITAIS DA EQUIPE ", colors.green)
+    -- ==========================================
+    -- COLUNA 1: RADAR E CONTROLES
+    -- ==========================================
+    local radarH = h - 9
+    drawRadar(c1X, 4, colW, radarH)
     
-    -- Jogador 1 (Dono)
+    -- Controles de Zoom (Debaixo do Radar)
+    drawBox(c1X, 4 + radarH, colW, 5, " CONTROLE DE ZOOM ", colors.gray)
+    local rangeStr = string.format(" ALCANCE: %03dm ", R_RANGES[rIdx])
+    local btnX = c1X + math.floor((colW - #rangeStr - 8)/2)
+    local btnY = 4 + radarH + 2
+    drawText(btnX, btnY, "[<<]", colors.yellow)
+    drawText(btnX + 4, btnY, rangeStr, colors.white)
+    drawText(btnX + 4 + #rangeStr, btnY, "[>>]", colors.yellow)
+
+    -- ==========================================
+    -- COLUNA 2: EQUIPA E DEFESA
+    -- ==========================================
+    local teamH = 16
+    drawBox(c2X, 4, colW, teamH, " COMANDO DE EQUIPE ", colors.green)
+    
+    -- Jogador 1
     local p1 = getPlayerStats(OWNER)
-    drawText(q2X + 2, 6, OWNER, colors.white)
+    drawText(c2X + 2, 6, "CMTE: " .. OWNER, colors.white)
     if p1 then
-        local hp1 = math.floor(p1.health)
-        local hp1Max = math.floor(p1.maxHealth or 20)
+        local hp1, hp1Max = math.floor(p1.health), math.floor(p1.maxHealth or 20)
         local c1 = hp1 <= 6 and colors.red or (hp1 <= 12 and colors.yellow or colors.lime)
-        drawText(q2X + colW - 12, 6, "[ ONLINE ]", colors.lime)
-        drawProgressBar(q2X + 2, 7, colW - 6, hp1, hp1Max, c1)
+        drawText(c2X + colW - 12, 6, "[ ONLINE ]", colors.lime)
+        drawProgressBar(c2X + 2, 8, colW - 6, hp1, hp1Max, c1)
     else
-        drawText(q2X + colW - 13, 6, "[ OFFLINE ]", colors.gray)
-        drawText(q2X + 2, 7, "Sem sinal.", colors.gray)
+        drawText(c2X + colW - 13, 6, "[ OFFLINE ]", colors.gray)
+        drawText(c2X + 2, 8, "Sinal ausente.", colors.gray)
     end
 
-    -- Jogador 2 (Aliado)
+    -- Jogador 2
     local p2 = getPlayerStats(ALLY)
-    drawText(q2X + 2, 10, ALLY, colors.white)
+    drawText(c2X + 2, 11, "ALIADO: " .. ALLY, colors.white)
     if p2 then
-        local hp2 = math.floor(p2.health)
-        local hp2Max = math.floor(p2.maxHealth or 20)
+        local hp2, hp2Max = math.floor(p2.health), math.floor(p2.maxHealth or 20)
         local c2 = hp2 <= 6 and colors.red or (hp2 <= 12 and colors.yellow or colors.lime)
-        drawText(q2X + colW - 12, 10, "[ ONLINE ]", colors.lime)
-        drawProgressBar(q2X + 2, 11, colW - 6, hp2, hp2Max, c2)
+        drawText(c2X + colW - 12, 11, "[ ONLINE ]", colors.lime)
+        drawProgressBar(c2X + 2, 13, colW - 6, hp2, hp2Max, c2)
     else
-        drawText(q2X + colW - 13, 10, "[ OFFLINE ]", colors.gray)
-        drawText(q2X + 2, 11, "Sem sinal.", colors.gray)
+        drawText(c2X + colW - 13, 11, "[ OFFLINE ]", colors.gray)
+        drawText(c2X + 2, 13, "Sinal ausente.", colors.gray)
     end
 
-    -- QUADRANTE 3: SEGURANCA E INTRUSOS
+    -- Monitor de Intrusos
+    local defY = 4 + teamH
+    local defH = h - defY - 4
     local secColor = (lockdownMode or #knownIntruders > 0) and colors.red or colors.orange
-    drawBox(2, 16, colW, 10, " MONITOR DE INTRUSOS ", secColor)
+    drawBox(c2X, defY, colW, defH, " MONITOR DE AMEACAS ", secColor)
     
     if #knownIntruders == 0 then
-        drawText(4, 18, "Status da Base:", colors.gray)
-        drawText(4, 19, "SEGURO - Sem ameacas.", colors.lime)
+        drawText(c2X + 2, defY + 3, "Status da Base:", colors.gray)
+        drawText(c2X + 2, defY + 4, "SEGURO - Sem ameacas.", colors.lime)
     else
-        drawText(4, 18, "AVISO DE INTRUSAO:", colors.red)
-        for i = 1, 3 do
-            if knownIntruders[i] then
-                drawText(4, 18 + i, "! " .. knownIntruders[i], colors.white)
-            end
+        drawText(c2X + 2, defY + 2, "INTRUSAO DETECTADA:", colors.red)
+        for i = 1, 5 do
+            if knownIntruders[i] then drawText(c2X + 2, defY + 2 + i, "! " .. knownIntruders[i], colors.white) end
         end
     end
     
-    -- Botao de Alerta (Touch)
-    local btnTxt = lockdownMode and " [ DESATIVAR DEFESA ] " or " [ ATIVAR DEFESA ] "
-    local btnCol = lockdownMode and colors.red or colors.orange
-    local btnX = 2 + math.floor((colW - #btnTxt)/2)
-    drawText(btnX, 23, btnTxt, colors.white, btnCol)
+    -- Botao Lockdown (Base da Coluna 2)
+    local lkTxt = lockdownMode and " [ DESATIVAR DEFESA ] " or " [ ATIVAR DEFESA ] "
+    local lkCol = lockdownMode and colors.red or colors.orange
+    drawText(c2X + math.floor((colW - #lkTxt)/2), h - 2, lkTxt, colors.white, lkCol)
 
-    -- QUADRANTE 4: CONDICOES DO MUNDO
-    drawBox(q2X, 16, colW, 10, " AMBIENTE ", colors.cyan)
+    -- ==========================================
+    -- COLUNA 3: AMBIENTE E LOGS
+    -- ==========================================
+    local envH = 10
+    drawBox(c3X, 4, colW, envH, " AMBIENTE LOCAL ", colors.cyan)
     local t = os.time()
-    local tStr = textutils.formatTime(t, false)
     local isDay = (t >= 6 and t < 18.5)
     
-    drawText(q2X + 2, 18, "Hora Local do Servidor:", colors.gray)
-    drawText(q2X + 2, 19, tStr, colors.white)
-    
-    drawText(q2X + 2, 21, "Nivel de Perigo Externo:", colors.gray)
-    if isDay then
-        drawText(q2X + 2, 22, "BAIXO (Luz Solar)", colors.yellow)
-    else
-        drawText(q2X + 2, 22, "ALTO (Monstros)", colors.red)
-    end
-    drawProgressBar(q2X + 2, 23, colW - 6, t, 24, isDay and colors.yellow or colors.purple)
+    drawText(c3X + 2, 6, "Relogio do Mundo:", colors.gray)
+    drawText(c3X + 2, 7, textutils.formatTime(t, false), colors.white)
+    drawText(c3X + 2, 9, "Nivel de Perigo Externo:", colors.gray)
+    drawText(c3X + 2, 10, isDay and "BAIXO (Dia)" or "ALTO (Monstros)", isDay and colors.yellow or colors.red)
+    drawProgressBar(c3X + 2, 11, colW - 6, t, 24, isDay and colors.yellow or colors.purple)
 
-    -- PAINEL INFERIOR: LOGS
-    local logY = 27
-    local logH = h - logY
-    drawBox(2, logY, w - 2, logH, " TERMINAL DE REGISTOS ", colors.gray)
-    
+    local logY = 4 + envH
+    drawBox(c3X, logY, colW, h - logY, " TERMINAL DE EVENTOS ", colors.gray)
     for i, msg in ipairs(logs) do
         if i <= maxLogs then
             local col = (i == 1) and colors.white or colors.gray
-            local prefix = (i == 1) and ">> " or "   "
-            drawText(4, logY + i, prefix .. msg, col)
+            drawText(c3X + 2, logY + 1 + i, ((i==1) and ">> " or "   ") .. msg, col)
         end
     end
 end
@@ -246,11 +259,8 @@ local function checkIntruders()
         for _, p in ipairs(players) do
             if not TEAM[p] then
                 table.insert(currentIntruders, p)
-                
                 local isNew = true
-                for _, old in ipairs(knownIntruders) do
-                    if old == p then isNew = false break end
-                end
+                for _, old in ipairs(knownIntruders) do if old == p then isNew = false break end end
                 if isNew then aiLog("ALERTA: Intruso detectado -> " .. p) end
             end
         end
@@ -262,8 +272,7 @@ end
 -- EXECUCAO PRINCIPAL
 -- ==========================================================
 term.clear()
-print("Mainframe V5 com Radar Iniciado.")
-print("Dono: " .. OWNER .. " | Aliado: " .. ALLY)
+print("Mainframe V6 (4x3) Iniciado.")
 
 checkIntruders()
 updateDashboard()
@@ -274,24 +283,32 @@ while true do
     
     if ev == "timer" and p1 == tid then
         uptime = uptime + 1
-        
-        -- Atualizar sensores a cada 2 segundos
-        if uptime % 2 == 0 then
-            checkIntruders()
-        end
-        
+        if uptime % 2 == 0 then checkIntruders() end
         updateDashboard()
         
     elseif ev == "monitor_touch" then
-        -- Detetar toque no Botao LOCKDOWN (Y=23 na nova interface)
-        if p3 == 23 and p2 < colW then
-            lockdownMode = not lockdownMode
-            if lockdownMode then
-                aiLog("COMANDO: PROTOCOLO DE DEFESA ATIVADO.")
-            else
-                aiLog("COMANDO: Defesas desativadas. Modo normal.")
+        local tx, ty = p2, p3
+        
+        -- Toque na Coluna 1 (Botões de Zoom)
+        if tx >= c1X and tx < c2X then
+            local radarH = h - 9
+            local btnY = 4 + radarH + 2
+            if ty == btnY or ty == btnY + 1 or ty == btnY - 1 then
+                if tx < c1X + (colW/2) then
+                    if rIdx > 1 then rIdx = rIdx - 1; aiLog("Zoom: " .. R_RANGES[rIdx] .. "m") end
+                else
+                    if rIdx < #R_RANGES then rIdx = rIdx + 1; aiLog("Zoom: " .. R_RANGES[rIdx] .. "m") end
+                end
+                updateDashboard()
             end
-            updateDashboard()
+            
+        -- Toque na Coluna 2 (Botão de Defesa)
+        elseif tx >= c2X and tx < c3X then
+            if ty >= h - 3 then
+                lockdownMode = not lockdownMode
+                aiLog(lockdownMode and "PROTOCOLO DE DEFESA ATIVADO." or "Defesas desativadas.")
+                updateDashboard()
+            end
         end
     end
 end
