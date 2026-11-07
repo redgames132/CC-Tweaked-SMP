@@ -1,6 +1,6 @@
 -- ==========================================================
--- J.A.R.V.I.S. T.A.C. V10 - SISTEMA MULTI-THREAD
--- Interacao de IA via Terminal, Comms Furtivo, UI Tatica
+-- J.A.R.V.I.S. T.A.C. V11 - SISTEMA DE COMANDO MILITAR
+-- Modulo de IA Substituido por Telemetria Orbital/Climatica
 -- ==========================================================
 
 local AI_NAME = "J.A.R.V.I.S. T.A.C."
@@ -15,20 +15,20 @@ if not mon then error("ERRO: Monitor ausente. Abortando boot.", 0) end
 local detector = peripheral.find("playerDetector") or peripheral.find("player_detector")
 local scanner  = peripheral.find("geoScanner") or peripheral.find("geo_scanner")
 local chatBox  = peripheral.find("chatBox") or peripheral.find("chat_box")
+local envSens  = peripheral.find("environmentDetector") or peripheral.find("environment_detector")
 
 -- Configuracao do Ecra (Matriz 4x3)
 mon.setTextScale(0.5)
 local w, h = mon.getSize()
 
--- Sistema de Abas
-local TABS = {"RADAR", "SCAN", "EQUIPE", "CORE", "COMMS", "BASE", "I.A."}
+-- Sistema de Abas (7 Abas Taticas)
+local TABS = {"RADAR", "SCAN", "EQUIPE", "CORE", "COMMS", "BASE", "ORBITAL"}
 local activeTab = 1
 local tabZones = {}
 
 -- Estado Global
-local logs = { "[SYS]: Modulo T.A.C. V10 Operacional." }
+local logs = { "[SYS]: Modulo T.A.C. V11 Operacional.", "[ORBITAL]: Enlace de satelite estabelecido." }
 local chatHistory = { "[INTERCETADOR]: Escuta de radio ativa." }
-local aiHistory = { "[M.I.N.D.]: Digite as suas perguntas no terminal do computador." }
 
 local maxLogs = h - 10
 local uptime = 0
@@ -43,42 +43,6 @@ local scanCooldown = 0
 local R_RANGES = {16, 32, 64, 128, 256}
 local rIdx = 2
 local rsStates = { top = false, bottom = false, left = false, right = false }
-
--- ==========================================================
--- MOTOR DE I.A. (M.I.N.D.)
--- ==========================================================
-local function generateAIResponse(query)
-    local t = query:lower()
-    
-    if t:find("quem e voce") or t:find("quem e vc") then
-        return "Sou J.A.R.V.I.S., Inteligencia Artificial Militar de Defesa."
-    elseif t:find(OWNER) or t:find("redgames132") then
-        return "Comandante Supremo. Autorizacao Nivel Omega."
-    elseif t:find(ALLY) or t:find("cadipadi") then
-        return "Operador Tatico Aliado. Autorizacao Nivel Alpha."
-    elseif t:find("piada") or t:find("engracado") then
-        local jokes = {
-            "O que a Redstone disse para a alavanca? 'Voce me liga.'",
-            "Por que o Enderman foi ao medico? Porque ele estava com blocos na barriga.",
-            "Desculpe, meu banco de dados de humor foi formatado para dar espaco a taticas de guerra."
-        }
-        return jokes[math.random(#jokes)]
-    elseif t:find("ameaca") or t:find("status") or t:find("relatorio") then
-        if lockdownMode then return "ALERTA MAXIMO. Protocolos de contencao ativos." end
-        if #knownIntruders > 0 then return "INTRUSOS NO PERIMETRO. Atencao imediata requerida." end
-        return "Perimetro seguro. Todos os sistemas operacionais."
-    elseif t:find("ola") or t:find("oi") then
-        return "Saudacoes, Comandante. Qual a diretiva de hoje?"
-    else
-        local fallbacks = {
-            "Afirmativo. Processando parametros...",
-            "Banco de dados insuficiente para esta analise.",
-            "Diretiva reconhecida e arquivada.",
-            "Recomendo verificar os sensores geologicos primeiro."
-        }
-        return fallbacks[math.random(#fallbacks)]
-    end
-end
 
 -- ==========================================================
 -- MOTOR DE RENDERIZACAO MILITAR (UI)
@@ -309,7 +273,7 @@ local function updateScreen()
 
     elseif activeTab == 5 then
         -- COMMS (ESCUTA DE RADIO)
-        drawBox(2, 4, w - 2, h - 4, "ESCUTA TÁTICA DE FREQUENCIAS (WIRETAP)", colors.gray, lockdownMode)
+        drawBox(2, 4, w - 2, h - 4, "ESCUTA TÁTICA DE FREQUENCIAS", colors.gray, lockdownMode)
         for i, msg in ipairs(chatHistory) do
             if i <= maxLogs then drawText(4, 5 + i, msg, (i==1) and colors.white or colors.gray) end
         end
@@ -327,114 +291,103 @@ local function updateScreen()
         rSw("Iluminacao Tatica (Dir)", "right", 14)
 
     elseif activeTab == 7 then
-        -- I.A. (M.I.N.D)
-        drawBox(2, 4, w - 2, h - 4, "MODULO COGNITIVO M.I.N.D.", colors.purple, lockdownMode)
-        for i, msg in ipairs(aiHistory) do
-            if i <= maxLogs then
-                local isUser = msg:find("CMTE:")
-                drawText(4, 5 + i, msg, isUser and colors.orange or ((i==1) and colors.white or colors.gray))
-            end
-        end
-    end
-end
-
--- ==========================================================
--- MULTI-THREADING (LOOPS PARALELOS)
--- ==========================================================
-
--- THREAD 1: Cuida do Monitor, Radar e Sensores
-local function systemLoop()
-    while true do
-        local tid = os.startTimer(1.0)
-        local ev, p1, p2, p3 = os.pullEvent()
+        -- NOVO: ORBITAL (SATELITE E CLIMA)
+        drawBox(2, 4, w - 2, h - 4, "ENLACE DE SATELITE ORBITAL", colors.blue, lockdownMode)
         
-        if ev == "timer" and p1 == tid then
-            uptime = uptime + 1
-            if scanCooldown > 0 then scanCooldown = scanCooldown - 1 end
-            if uptime % 2 == 0 then checkIntruders() end
-            updateScreen()
+        if not envSens then
+            drawText(4, 7, "[ALERTA]: Sensor Ambiental Offline.", colors.red)
+            drawText(4, 8, "Conecte um 'Environment Detector' a base.", colors.gray)
+        else
+            -- Clima e Condicoes
+            local isRain = false
+            local isThun = false
+            local rad = 0
             
-        elseif ev == "chat" then
-            -- Apenas escutar para a aba COMMS (Wiretap)
-            local sender, msg = p1, p2
-            if type(p2) == "string" and p2:find("%-") then sender, msg = p2, p3 end
-            if type(msg) == "string" then
-                table.insert(chatHistory, 1, "[" .. tostring(sender) .. "]: " .. msg)
-                if #chatHistory > maxLogs then table.remove(chatHistory, #chatHistory) end
-                if activeTab == 5 then updateScreen() end
-            end
+            pcall(function() isRain = envSens.isRaining() end)
+            pcall(function() isThun = envSens.isThunder() end)
+            pcall(function() rad = envSens.getRadiation() end)
             
-        elseif ev == "monitor_touch" then
-            local tx, ty = p2, p3
-            if ty == 2 then
-                for i, zone in ipairs(tabZones) do
-                    if tx >= zone.startX and tx <= zone.endX then
-                        activeTab = i; updateScreen(); break
-                    end
-                end
-            else
-                if activeTab == 1 then
-                    if ty == h - 2 then
-                        if tx >= 4 and tx <= 8 and rIdx > 1 then rIdx = rIdx - 1; updateScreen()
-                        elseif tx >= 24 and tx <= 28 and rIdx < #R_RANGES then rIdx = rIdx + 1; updateScreen() end
-                    end
-                elseif activeTab == 2 then
-                    local cW = math.floor((w - 4) / 2)
-                    if ty == 11 and tx < cW and scanCooldown == 0 then runScan(); updateScreen() end
-                elseif activeTab == 3 then
-                    local cW = math.floor((w - 4) / 2)
-                    if ty == h - 2 and tx > cW + 3 then
-                        lockdownMode = not lockdownMode
-                        aiLog(lockdownMode and "[COMANDO]: DEFESA ATIVADA." or "[COMANDO]: Standby.")
-                        updateScreen()
-                    end
-                elseif activeTab == 6 then
-                    if tx >= 26 and tx <= 40 then
-                        if ty == 8 then toggleRedstone("top"); updateScreen()
-                        elseif ty == 10 then toggleRedstone("bottom"); updateScreen()
-                        elseif ty == 12 then toggleRedstone("left"); updateScreen()
-                        elseif ty == 14 then toggleRedstone("right"); updateScreen()
-                        end
-                    end
-                end
-            end
+            drawText(4, 6, "Condicoes Atmosfericas:", colors.gray)
+            if isThun then drawText(4, 7, "TEMPESTADE SEVERA (Risco de Raios)", colors.red)
+            elseif isRain then drawText(4, 7, "CHUVA (Visibilidade Reduzida)", colors.orange)
+            else drawText(4, 7, "CEU LIMPO (Condicoes Ideais)", colors.lime) end
+            
+            drawText(4, 11, "Nivel de Radiacao Local (Mekanism):", colors.gray)
+            drawText(4, 12, string.format("%.4f Sv/h", rad or 0), (rad and rad > 0.01) and colors.red or colors.lime)
         end
-    end
-end
-
--- THREAD 2: Cuida exclusivamente do terminal (Teclado do Jogador)
-local function terminalLoop()
-    while true do
-        term.clear()
-        term.setCursorPos(1, 1)
-        term.setTextColor(colors.red)
-        print("=== TERMINAL M.I.N.D. ===")
-        term.setTextColor(colors.gray)
-        print("A interacao ira aparecer na aba [I.A.] do monitor.")
-        term.setTextColor(colors.white)
-        write("\nComandante > ")
         
-        local input = read()
-        
-        if input and #input > 0 then
-            local resposta = generateAIResponse(input)
-            table.insert(aiHistory, 1, "[M.I.N.D.]: " .. resposta)
-            table.insert(aiHistory, 1, "[CMTE]: " .. input)
-            if #aiHistory > maxLogs then
-                table.remove(aiHistory, #aiHistory)
-                table.remove(aiHistory, #aiHistory)
-            end
-            if activeTab == 7 then updateScreen() end
+        -- Deducao de Risco Noturno
+        local time = os.time()
+        drawText(4, 16, "Analise de Risco da Superficie:", colors.gray)
+        if time >= 18.5 or time < 6 then
+            drawText(4, 17, "ATIVIDADE HOSTIL ALTA (Noite)", colors.red)
+        else
+            drawText(4, 17, "ATIVIDADE HOSTIL BAIXA (Dia)", colors.yellow)
         end
     end
 end
 
 -- ==========================================================
--- BOOT
+-- LOOP PRINCIPAL (UNIFICADO)
 -- ==========================================================
 term.clear()
+print("J.A.R.V.I.S. T.A.C. V11 Online.")
 checkIntruders()
 updateScreen()
 
--- Roda as duas funcoes ao mesmo tempo (Paralelismo)
-parallel.waitForAny(systemLoop, terminalLoop)
+while true do
+    local tid = os.startTimer(1.0)
+    local ev, p1, p2, p3 = os.pullEvent()
+    
+    if ev == "timer" and p1 == tid then
+        uptime = uptime + 1
+        if scanCooldown > 0 then scanCooldown = scanCooldown - 1 end
+        if uptime % 2 == 0 then checkIntruders() end
+        updateScreen()
+        
+    elseif ev == "chat" then
+        -- Escutar para a aba COMMS
+        local sender, msg = p1, p2
+        if type(p2) == "string" and p2:find("%-") then sender, msg = p2, p3 end
+        if type(msg) == "string" then
+            table.insert(chatHistory, 1, "[" .. tostring(sender) .. "]: " .. msg)
+            if #chatHistory > maxLogs then table.remove(chatHistory, #chatHistory) end
+            if activeTab == 5 then updateScreen() end
+        end
+        
+    elseif ev == "monitor_touch" then
+        local tx, ty = p2, p3
+        if ty == 2 then
+            for i, zone in ipairs(tabZones) do
+                if tx >= zone.startX and tx <= zone.endX then
+                    activeTab = i; updateScreen(); break
+                end
+            end
+        else
+            if activeTab == 1 then
+                if ty == h - 2 then
+                    if tx >= 4 and tx <= 8 and rIdx > 1 then rIdx = rIdx - 1; updateScreen()
+                    elseif tx >= 24 and tx <= 28 and rIdx < #R_RANGES then rIdx = rIdx + 1; updateScreen() end
+                end
+            elseif activeTab == 2 then
+                local cW = math.floor((w - 4) / 2)
+                if ty == 11 and tx < cW and scanCooldown == 0 then runScan(); updateScreen() end
+            elseif activeTab == 3 then
+                local cW = math.floor((w - 4) / 2)
+                if ty == h - 2 and tx > cW + 3 then
+                    lockdownMode = not lockdownMode
+                    aiLog(lockdownMode and "[COMANDO]: DEFESA ATIVADA." or "[COMANDO]: Standby.")
+                    updateScreen()
+                end
+            elseif activeTab == 6 then
+                if tx >= 26 and tx <= 40 then
+                    if ty == 8 then toggleRedstone("top"); updateScreen()
+                    elseif ty == 10 then toggleRedstone("bottom"); updateScreen()
+                    elseif ty == 12 then toggleRedstone("left"); updateScreen()
+                    elseif ty == 14 then toggleRedstone("right"); updateScreen()
+                    end
+                end
+            end
+        end
+    end
+end
